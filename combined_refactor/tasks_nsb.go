@@ -476,7 +476,6 @@ func runNSBTask(ctx context.Context, session *appSession, fileName, fileContent,
 			for _, failure := range sortedNSBFailures(failures) {
 				recordAllDebugError("nsb_failure", fmt.Sprintf("ip=%s port=%s phase=%s reason=%s detail=%s", failure.ipAddr, failure.port, failure.phase, failure.reason, failure.detail))
 			}
-			session.sendWSMessage("log", fmt.Sprintf("非标失败明细已写入 debug log (失败 %d 条)", len(failures)))
 		}()
 	}
 
@@ -604,6 +603,152 @@ func runNSBTask(ctx context.Context, session *appSession, fileName, fileContent,
 
 	session.sendWSMessage("nsb_csv_complete", nsbCSVCompletePayload{Headers: headers, Rows: rows, File: outFile, Status: completionStatus, Message: completionMessage, QualifiedCount: qualifiedCount})
 	session.sendWSMessage("log", fmt.Sprintf("非标优选完成，结果文件: %s", outFile))
+}
+
+func runNSBSpeedBatch(ctx context.Context, session *appSession, rows []nsbScanMessage, maxWorkers int, speedURL string, enableTLS bool, speedMin float64, speedLimit int, skipTested bool, compact bool) {
+	if speedLimit <= 0 {
+		session.sendWSMessage("log", "非标批量测速已关闭（测速上限 0）")
+		session.sendWSMessage("nsb_speed_complete", map[string]interface{}{"qualified": 0, "limit": speedLimit})
+		return
+	}
+	if speedMin <= 0 {
+		speedMin = 0.1
+	}
+	if maxWorkers <= 0 {
+		maxWorkers = 1
+	}
+
+	results := make([]iptestResult, 0, len(rows))
+	for _, row := range rows {
+		res, ok := nsbMessageToResult(row)
+		if !ok {
+			continue
+		}
+		status := getNSBSpeedStatus(res.speedText, speedMin)
+		if skipTested && status != "untested" {
+			continue
+		}
+		results = append(results, res)
+	}
+
+	if len(results) == 0 {
+		if skipTested {
+			session.sendWSMessage("log", "没有未测速的非标结果，跳过继续测速")
+		} else {
+			session.sendWSMessage("log", "没有可测速的非标结果")
+		}
+		session.sendWSMessage("nsb_speed_complete", map[string]interface{}{"qualified": 0, "limit": speedLimit})
+		return
+	}
+
+	session.sendWSMessage("log", fmt.Sprintf("开始非标测速：%d 条记录，线程数=%d，目标上限=%d，测速阈值=%.2fMB/s", len(results), maxWorkers, speedLimit, speedMin))
+	reportNSBProgress(session, "speed", 0, speedLimit, "测速中")
+	speedCanceled := runNSBSpeedWorkers(ctx, results, maxWorkers, speedLimit, speedMin, func(tested, qualified int) {
+		reportNSBProgress(session, "speed", qualified, speedLimit, "测速中")
+	}, func(idx int, speedErr string) {
+		res := &results[idx]
+		session.sendWSMessage("nsb_scan_result", res.toNSBLiveMessage(res.speedText, compact))
+	}, func(idx int) (float64, string) {
+		res := &results[idx]
+		return runNSBDownloadSpeed(ctx, res.ipAddr, res.port, enableTLS, speedURL)
+	})
+
+	qualifiedCount := 0
+	for i := range results {
+		if results[i].speedTested && results[i].speedText == "" {
+			results[i].speedText = fmt.Sprintf("%.2fMB/s", results[i].downloadSpeed/1024)
+		}
+		if results[i].speedTested && results[i].downloadSpeed/1024 >= speedMin {
+			results[i].speedQualified = true
+			qualifiedCount++
+		}
+	}
+	if speedCanceled || ctx.Err() != nil {
+		session.sendWSMessage("log", "非标批量测速已终止")
+		return
+	}
+	totalQualified := countNSBTotalQualified(rows, results, speedMin)
+	session.sendWSMessage("log", fmt.Sprintf("非标批量测速完成，达标 %d/%d，总达标 %d", qualifiedCount, speedLimit, totalQualified))
+	session.sendWSMessage("nsb_speed_complete", map[string]interface{}{"qualified": qualifiedCount, "totalQualified": totalQualified, "limit": speedLimit})
+}
+
+func countNSBTotalQualified(rows []nsbScanMessage, updated []iptestResult, speedMin float64) int {
+	updatedSpeed := make(map[string]string, len(updated))
+	for _, result := range updated {
+		updatedSpeed[result.ipAddr+":"+strconv.Itoa(result.port)] = result.speedText
+	}
+	count := 0
+	for _, row := range rows {
+		key := strings.TrimSpace(row.IP) + ":" + strings.TrimSpace(row.Port)
+		speedText := row.Speed
+		if speed, ok := updatedSpeed[key]; ok {
+			speedText = speed
+		}
+		if getNSBSpeedStatus(speedText, speedMin) == "qualified" {
+			count++
+		}
+	}
+	return count
+}
+
+func nsbMessageToResult(row nsbScanMessage) (iptestResult, bool) {
+	port, err := strconv.Atoi(strings.TrimSpace(row.Port))
+	if err != nil || port <= 0 || strings.TrimSpace(row.IP) == "" {
+		return iptestResult{}, false
+	}
+	return iptestResult{
+		ipAddr:      strings.TrimSpace(row.IP),
+		port:        port,
+		dataCenter:  row.DC,
+		locCode:     row.Loc,
+		region:      row.Region,
+		city:        row.City,
+		latency:     row.Latency,
+		lossRate:    parsePercent(row.LossRate),
+		outboundIP:  row.OutboundIP,
+		ipType:      row.IPType,
+		asnNumber:   row.ASNNumber,
+		asnOrg:      row.ASNOrg,
+		visitScheme: firstNonEmpty(row.VisitScheme, mapBoolTLS(row.TLS)),
+		tlsVersion:  row.TLSVersion,
+		sni:         row.SNI,
+		httpVersion: row.HTTPVersion,
+		warp:        row.Warp,
+		gateway:     row.Gateway,
+		rbi:         row.RBI,
+		kex:         row.Kex,
+		timestamp:   row.Timestamp,
+		speedText:   row.Speed,
+	}, true
+}
+
+func parsePercent(value string) float64 {
+	percent, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(value), "%"), 64)
+	if err != nil {
+		return 0
+	}
+	return percent / 100
+}
+
+func mapBoolTLS(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "true") {
+		return "https"
+	}
+	return "http"
+}
+
+func getNSBSpeedStatus(value string, speedMin float64) string {
+	text := strings.TrimSpace(value)
+	if text == "" || text == "-" || text == "未测速" {
+		return "untested"
+	}
+	if strings.Contains(text, "MB/s") {
+		speed, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(strings.TrimSuffix(text, "MB/s")), "MB/s"), 64)
+		if err == nil && speed >= speedMin {
+			return "qualified"
+		}
+	}
+	return "unqualified"
 }
 
 func runNSBSpeedWorkers(ctx context.Context, results []iptestResult, maxWorkers, targetQualified int, speedMin float64, onProgress func(tested, qualified int), onResult func(idx int, speedErr string), work func(idx int) (float64, string)) bool {

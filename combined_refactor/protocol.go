@@ -52,6 +52,17 @@ type startNSBTaskRequest struct {
 	Compact     bool    `json:"compact"`
 }
 
+type startNSBSpeedBatchRequest struct {
+	Results    []nsbScanMessage `json:"results"`
+	SpeedTest  int              `json:"speedTest"`
+	SpeedURL   string           `json:"speedURL"`
+	EnableTLS  bool             `json:"enableTLS"`
+	SpeedMin   float64          `json:"speedMin"`
+	SpeedLimit int              `json:"speedLimit"`
+	SkipTested bool             `json:"skipTested"`
+	Compact    bool             `json:"compact"`
+}
+
 type githubUploadRequest struct {
 	Token   string `json:"token"`
 	Owner   string `json:"owner"`

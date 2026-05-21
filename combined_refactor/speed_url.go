@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,6 +17,7 @@ const autoSpeedURLValue = "auto"
 const (
 	cmSpeedURL              = "cf.090227.xyz/__down?bytes=99999999"
 	mobileDedicatedSpeedURL = "speed.okl.abrdns.com"
+	cloudflareSpeedURL      = "speed.cloudflare.com/__down?bytes=99999999"
 	ispProbeURL             = "https://cf.090227.xyz/cf.json"
 )
 
@@ -25,22 +26,10 @@ type ispProbeInfo struct {
 	ASOrganization string `json:"asOrganization"`
 }
 
-var encodedAutoSpeedURLs = []string{
-	"Y2YuMDkwMjI3Lnh5ei9fX2Rvd24/Ynl0ZXM9OTk5OTk5OTk=",
-	"aHR0cHM6Ly9ub2RlanMub3JnL2Rpc3QvdjIyLjIxLjEvbm9kZS12MjIuMjEuMS50YXIuZ3o=",
-	"aHR0cHM6Ly9ub2RlanMub3JnL2Rpc3QvdjIzLjExLjEvbm9kZS12MjMuMTEuMS50YXIuZ3o=",
-	"aHR0cHM6Ly9ub2RlanMub3JnL2Rpc3QvdjI0LjEyLjAvbm9kZS12MjQuMTIuMC50YXIuZ3o=",
-	"aHR0cHM6Ly9yZWdpc3RyeS5ucG1qcy5vcmcvb25ueHJ1bnRpbWUtbm9kZS8tL29ubnhydW50aW1lLW5vZGUtMS4yMy4yLnRneg==",
-	"aHR0cHM6Ly9yZWdpc3RyeS5ucG1qcy5vcmcvb25ueHJ1bnRpbWUtbm9kZS8tL29ubnhydW50aW1lLW5vZGUtMS4yMy4wLnRneg==",
-	"aHR0cHM6Ly9yZWdpc3RyeS5ucG1qcy5vcmcvb25ueHJ1bnRpbWUtbm9kZS8tL29ubnhydW50aW1lLW5vZGUtMS4yMi4wLnRneg==",
-	"aHR0cHM6Ly9ub2RlanMub3JnL2Rpc3QvdjIxLjcuMy9ub2RlLXYyMS43LjMudGFyLmd6",
-	"aHR0cHM6Ly9ub2RlanMub3JnL2Rpc3QvdjIwLjE5LjYvbm9kZS12MjAuMTkuNi50YXIuZ3o=",
-	"aHR0cHM6Ly9ub2RlanMub3JnL2Rpc3QvdjE4LjIwLjgvbm9kZS12MTguMjAuOC50YXIuZ3o=",
-	"aHR0cHM6Ly9yZXBvLmFuYWNvbmRhLmNvbS9taW5pY29uZGEvTWluaWNvbmRhMy1weTMxMF8yNC4xMS4xLTAtTGludXgteDg2XzY0LnNo",
-	"aHR0cHM6Ly9yZXBvLmFuYWNvbmRhLmNvbS9taW5pY29uZGEvTWluaWNvbmRhMy1weTMxMV8yNC4xMS4xLTAtTGludXgteDg2XzY0LnNo",
-	"aHR0cHM6Ly9yZXBvLmFuYWNvbmRhLmNvbS9taW5pY29uZGEvTWluaWNvbmRhMy1weTMxMl8yNC4xMS4xLTAtTGludXgteDg2XzY0LnNo",
-	"aHR0cHM6Ly9yZXBvLmFuYWNvbmRhLmNvbS9taW5pY29uZGEvTWluaWNvbmRhMy1sYXRlc3QtTGludXgteDg2XzY0LnNo",
-}
+var autoSpeedURLState = struct {
+	sync.RWMutex
+	value string
+}{value: cloudflareSpeedURL}
 
 func resolveSpeedTestURL(rawURL string) string {
 	value := strings.TrimSpace(rawURL)
@@ -54,18 +43,18 @@ func resolveSpeedTestURL(rawURL string) string {
 }
 
 func pickAutoSpeedURL() string {
-	if len(encodedAutoSpeedURLs) == 0 {
-		return speedTestURL
+	value := currentAutoSpeedURLDefault()
+	if strings.TrimSpace(value) == "" {
+		return cloudflareSpeedURL
 	}
-	idx := 0
-	if n, err := rand.Int(rand.Reader, big.NewInt(int64(len(encodedAutoSpeedURLs)))); err == nil {
-		idx = int(n.Int64())
-	}
-	decoded, err := base64.StdEncoding.DecodeString(encodedAutoSpeedURLs[idx])
-	if err != nil || len(decoded) == 0 {
-		return speedTestURL
-	}
-	return string(decoded)
+	return value
+}
+
+func currentAutoSpeedURLDefault() string {
+	autoSpeedURLState.RLock()
+	value := autoSpeedURLState.value
+	autoSpeedURLState.RUnlock()
+	return value
 }
 
 func resolveStartupSpeedTestURL(ctx context.Context, rawURL string) (string, ispProbeInfo, error) {
@@ -81,9 +70,21 @@ func resolveStartupSpeedTestURL(ctx context.Context, rawURL string) (string, isp
 		return autoSpeedURLValue, info, err
 	}
 	if isChinaMobileISP(info) {
-		return pickMobileSpeedURL(), info, nil
+		setAutoSpeedURLDefault(pickMobileSpeedURL())
+		return autoSpeedURLValue, info, nil
 	}
+	setAutoSpeedURLDefault(cloudflareSpeedURL)
 	return autoSpeedURLValue, info, nil
+}
+
+func setAutoSpeedURLDefault(value string) {
+	autoSpeedURLState.Lock()
+	defer autoSpeedURLState.Unlock()
+	if strings.TrimSpace(value) == "" {
+		autoSpeedURLState.value = cloudflareSpeedURL
+		return
+	}
+	autoSpeedURLState.value = value
 }
 
 func isAutoSpeedURL(value string) bool {

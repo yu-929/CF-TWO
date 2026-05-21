@@ -170,7 +170,7 @@ var (
 		{name: "out", description: "输出文件名", defaultValue: "ip.csv"},
 		{name: "progress", description: "是否输出进度日志", defaultValue: "true"},
 		{name: "nocolor", description: "禁用颜色输出（cmd 等不支持 ANSI 的终端可开启避免乱码）", defaultValue: "false"},
-		{name: "url", description: "测速下载地址；auto 表示从内置地址池随机选择", defaultValue: autoSpeedURLValue},
+		{name: "url", description: "测速下载地址；auto 表示由后端自动选择内置测速源", defaultValue: autoSpeedURLValue},
 		{name: "dns", description: "自定义 DNS 服务器，例如 1.1.1.1 或 223.5.5.5,8.8.8.8；默认系统 DNS 优先，失败回退内置 DNS；显式设置时强制使用指定 DNS", defaultValue: defaultDNSServers},
 		{name: "debug", description: "调试输出等级：error、all；true 等同 error", defaultValue: "false"},
 		{name: "compactipv4", description: "精简本地 IPv4 地址库：按 /24 子网测 TCP:80 连通性并覆盖 ips-v4.txt", defaultValue: "false"},
@@ -297,16 +297,13 @@ func applyCLISpeedDefault() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	resolved, info, err := resolveStartupSpeedTestURL(ctx, speedTestURL)
+	_, info, err := resolveStartupSpeedTestURL(ctx, speedTestURL)
 	cancel()
 	if err != nil {
 		recordDebugError("speed_isp_check", err.Error())
 		return
 	}
-	if resolved != autoSpeedURLValue {
-		speedTestURL = resolved
-		recordDebugByLevel("all", "speed_isp_check", fmt.Sprintf("cli asn=%d org=%s default=%s", info.ASN, info.ASOrganization, speedTestURL))
-	}
+	recordDebugByLevel("all", "speed_isp_check", fmt.Sprintf("cli asn=%d org=%s mobile=%v selected=%s", info.ASN, info.ASOrganization, isChinaMobileISP(info), currentAutoSpeedURLDefault()))
 }
 
 func prepareCLIConfig(cfg *cliConfig) error {
@@ -655,7 +652,7 @@ func buildCLIConfigHelp() []cliConfigHelp {
 		{Name: "speedtest", Description: "非标测速线程数；表示同时测速的 IP 数量，0 表示不测速", Default: "0"},
 		{Name: "progress", Description: "输出进度日志", Default: "true", Options: []string{"true", "false"}},
 		{Name: "nocolor", Description: "禁用 ANSI 颜色输出", Default: "false", Options: []string{"true", "false"}},
-		{Name: "url", Description: "测速下载地址；auto 表示从内置地址池随机选择，也可填写完整 URL 或不含协议前缀的地址", Default: autoSpeedURLValue},
+		{Name: "url", Description: "测速下载地址；auto 表示由后端自动选择内置测速源，也可填写完整 URL 或不含协议前缀的地址", Default: autoSpeedURLValue},
 		{Name: "dns", Description: "自定义 DNS 服务器；默认系统 DNS 优先，失败回退内置 DNS；显式设置时强制使用指定 DNS。用于 IP 库、locations、ASN、GitHub、网络 URL 输入等需要 DNS 的外部请求", Default: defaultDNSServers},
 		{Name: "debug", Description: "调试输出等级；error 记录程序错误和下载/更新/API 异常，all 额外包含测速失败等全部明细", Default: "false", Options: []string{"false", "error", "all", "true"}},
 		{Name: "compactipv4", Description: "精简本地 IPv4 地址库并覆盖 ips-v4.txt", Default: "false", Options: []string{"true", "false"}},

@@ -77,7 +77,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		recordDebugError("speed_isp_check", speedISPErr.Error())
 	}
 	if speedISPErr == nil {
-		recordDebugByLevel("all", "speed_isp_check", fmt.Sprintf("asn=%d org=%s mobile=%v default=%s", speedISP.ASN, speedISP.ASOrganization, isChinaMobileISP(speedISP), defaultSpeedURL))
+		recordDebugByLevel("all", "speed_isp_check", fmt.Sprintf("asn=%d org=%s mobile=%v selected=%s", speedISP.ASN, speedISP.ASOrganization, isChinaMobileISP(speedISP), currentAutoSpeedURLDefault()))
 	}
 	session.sendWSMessage("init_config", map[string]interface{}{
 		"speedTestURL":     speedTestURL,
@@ -246,6 +246,32 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					fileContent = content
 				}
 				runNSBTask(ctx, session, fileName, fileContent, params.OutFile, params.MaxThreads, params.SpeedTest, params.SpeedURL, params.EnableTLS, params.Delay, params.ResultLimit, params.DC, params.SpeedMin, params.SpeedLimit, params.Compact)
+			})
+		},
+		"start_nsb_speed_batch": func(data json.RawMessage) {
+			var params startNSBSpeedBatchRequest
+			if err := json.Unmarshal(data, &params); err != nil {
+				session.sendWSMessage("error", "start_nsb_speed_batch 参数解析失败")
+				return
+			}
+			if params.SpeedTest < 0 {
+				params.SpeedTest = 0
+			}
+			if params.SpeedLimit < 0 {
+				params.SpeedLimit = 0
+			}
+			if params.SpeedMin <= 0 {
+				params.SpeedMin = 0.1
+			}
+			if strings.TrimSpace(params.SpeedURL) == "" {
+				params.SpeedURL = speedTestURL
+			}
+			if len(params.Results) == 0 {
+				session.sendWSMessage("error", "没有可测速的非标结果")
+				return
+			}
+			session.startTask(func(ctx context.Context, session *appSession) {
+				runNSBSpeedBatch(ctx, session, params.Results, params.SpeedTest, params.SpeedURL, params.EnableTLS, params.SpeedMin, params.SpeedLimit, params.SkipTested, params.Compact)
 			})
 		},
 		"stop_task": func(data json.RawMessage) {
