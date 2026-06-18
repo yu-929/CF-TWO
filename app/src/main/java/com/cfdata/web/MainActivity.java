@@ -4,16 +4,21 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -66,13 +71,44 @@ public class MainActivity extends Activity {
         rootView.addView(loadingView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(rootView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         applySystemBarInsets(rootView);
+        setStatusBarTheme(isDarkMode());
         configureWebView();
         startBackend();
     }
 
+    private boolean isDarkMode() {
+        int nightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        return nightMode == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    private void setStatusBarTheme(boolean dark) {
+        int color = dark ? Color.rgb(15, 23, 42) : Color.rgb(246, 248, 251);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setStatusBarColor(color);
+            getWindow().setNavigationBarColor(color);
+            getWindow().getDecorView().getWindowInsetsController().setSystemBarsAppearance(
+                dark ? 0 : WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+            );
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+            getWindow().setStatusBarColor(color);
+            getWindow().setNavigationBarColor(color);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                View decor = getWindow().getDecorView();
+                if (dark) {
+                    decor.setSystemUiVisibility(decor.getSystemUiVisibility() & ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+                } else {
+                    decor.setSystemUiVisibility(decor.getSystemUiVisibility() | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+                }
+            }
+        }
+    }
+
     private View createLoadingView() {
+        boolean dark = isDarkMode();
         FrameLayout overlay = new FrameLayout(this);
-        overlay.setBackgroundColor(Color.rgb(246, 248, 251));
+        overlay.setBackgroundColor(dark ? Color.rgb(15, 23, 42) : Color.rgb(246, 248, 251));
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -81,9 +117,9 @@ public class MainActivity extends Activity {
         card.setElevation(dp(8));
 
         GradientDrawable cardBackground = new GradientDrawable();
-        cardBackground.setColor(Color.WHITE);
+        cardBackground.setColor(dark ? Color.rgb(30, 41, 59) : Color.WHITE);
         cardBackground.setCornerRadius(dp(22));
-        cardBackground.setStroke(dp(1), Color.argb(160, 226, 232, 240));
+        cardBackground.setStroke(dp(1), dark ? Color.argb(160, 51, 65, 85) : Color.argb(160, 226, 232, 240));
         card.setBackground(cardBackground);
 
         ImageView logo = new ImageView(this);
@@ -95,7 +131,7 @@ public class MainActivity extends Activity {
 
         loadingTitle = new TextView(this);
         loadingTitle.setText("CFData");
-        loadingTitle.setTextColor(Color.rgb(31, 41, 55));
+        loadingTitle.setTextColor(dark ? Color.rgb(241, 245, 249) : Color.rgb(31, 41, 55));
         loadingTitle.setTextSize(24);
         loadingTitle.setTypeface(Typeface.DEFAULT_BOLD);
         loadingTitle.setGravity(Gravity.CENTER);
@@ -105,7 +141,7 @@ public class MainActivity extends Activity {
 
         loadingMessage = new TextView(this);
         loadingMessage.setText("正在启动本地服务...");
-        loadingMessage.setTextColor(Color.rgb(100, 116, 139));
+        loadingMessage.setTextColor(dark ? Color.rgb(148, 163, 184) : Color.rgb(100, 116, 139));
         loadingMessage.setTextSize(14);
         loadingMessage.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams messageParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -315,6 +351,17 @@ public class MainActivity extends Activity {
     }
 
     public class AndroidBridge {
+        @JavascriptInterface
+        public boolean isDarkMode() {
+            int nightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+            return nightMode == Configuration.UI_MODE_NIGHT_YES;
+        }
+
+        @JavascriptInterface
+        public void setDarkMode(boolean dark) {
+            mainHandler.post(() -> setStatusBarTheme(dark));
+        }
+
         @JavascriptInterface
         public void saveTextFile(String fileName, String content) {
             mainHandler.post(() -> {
