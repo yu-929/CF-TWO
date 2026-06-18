@@ -286,12 +286,13 @@ func (s *appSession) applyBackgroundMessageLocked(msgType string, data interface
 			return
 		}
 		phase := "扫描中"
+		current := asInt(m["current"])
+		total := asInt(m["total"])
 		if msgType == "test_progress" {
 			phase = "详细测试中"
-			s.backgroundSnapshot.ScanTotal = asInt(m["total"])
-			s.backgroundSnapshot.ScanFailed = max(asInt(m["current"])-s.backgroundSnapshot.ScanSuccess, 0)
 		}
-		s.updateProgressSnapshotLocked(phase, asInt(m["current"]), asInt(m["total"]), phase)
+		s.backgroundSnapshot.ScanFailed = max(current-s.backgroundSnapshot.ScanSuccess, 0)
+		s.updateProgressSnapshotLocked(phase, current, total, phase)
 	case "official_speed_progress":
 		m, ok := data.(map[string]interface{})
 		if !ok {
@@ -309,30 +310,36 @@ func (s *appSession) applyBackgroundMessageLocked(msgType string, data interface
 		if text == "" || text == "<nil>" {
 			text = "处理中"
 		}
-		if fmt.Sprint(m["phase"]) == "scan" {
-			s.backgroundSnapshot.ScanTotal = asInt(m["total"])
-		} else if fmt.Sprint(m["phase"]) == "speed" {
-			s.backgroundSnapshot.SpeedTotal = asInt(m["total"])
-			s.backgroundSnapshot.SpeedQualified = asInt(m["current"])
+		phase := fmt.Sprint(m["phase"])
+		current := asInt(m["current"])
+		total := asInt(m["total"])
+		
+		if phase == "scan" {
+			s.backgroundSnapshot.ScanFailed = max(current-s.backgroundSnapshot.ScanSuccess, 0)
+		} else if phase == "speed" {
+			s.backgroundSnapshot.SpeedQualified = current
 		}
-		s.updateProgressSnapshotLocked(text, asInt(m["current"]), asInt(m["total"]), text)
+		s.updateProgressSnapshotLocked(text, current, total, text)
 	case "scan_result":
 		s.backgroundSnapshot.ResultCount++
-		s.backgroundSnapshot.ScanSuccess = s.backgroundSnapshot.ResultCount
+		s.backgroundSnapshot.ScanSuccess++
+		s.backgroundSnapshot.ScanTotal++
 	case "nsb_scan_result":
 		if s.backgroundSnapshot.Phase == "测速中" {
 			s.backgroundSnapshot.SpeedCount++
 			s.updateBackgroundSpeedStatsLocked(data)
 		} else {
 			s.backgroundSnapshot.ResultCount++
-			s.backgroundSnapshot.ScanSuccess = s.backgroundSnapshot.ResultCount
+			s.backgroundSnapshot.ScanSuccess++
+			s.backgroundSnapshot.ScanTotal++
 		}
 	case "speed_test_result":
 		s.backgroundSnapshot.SpeedCount++
 		s.updateBackgroundSpeedStatsLocked(data)
 	case "test_result":
 		s.backgroundSnapshot.TestCount++
-		s.backgroundSnapshot.ScanSuccess = s.backgroundSnapshot.TestCount
+		s.backgroundSnapshot.ScanSuccess++
+		s.backgroundSnapshot.ScanTotal++
 	case "scan_complete_wait_dc":
 		if list, ok := data.([]DataCenterInfo); ok {
 			s.backgroundSnapshot.DCCount = len(list)
@@ -363,6 +370,7 @@ func (s *appSession) applyBackgroundMessageLocked(msgType string, data interface
 
 func (s *appSession) updateBackgroundSpeedStatsLocked(data interface{}) {
 	s.backgroundSnapshot.SpeedSuccess++
+	s.backgroundSnapshot.SpeedTotal++
 	speedText := ""
 	switch value := data.(type) {
 	case map[string]string:
@@ -418,15 +426,6 @@ func (s *appSession) backgroundSpeedMinLocked() float64 {
 }
 
 func (s *appSession) finishBackgroundStatsLocked() {
-	if s.backgroundSnapshot.ScanTotal > 0 && s.backgroundSnapshot.ScanFailed == 0 {
-		s.backgroundSnapshot.ScanFailed = max(s.backgroundSnapshot.ScanTotal-s.backgroundSnapshot.ScanSuccess, 0)
-	}
-	if s.backgroundSnapshot.SpeedTotal > 0 {
-		observed := s.backgroundSnapshot.SpeedSuccess + s.backgroundSnapshot.SpeedFailed
-		if observed < s.backgroundSnapshot.SpeedTotal {
-			s.backgroundSnapshot.SpeedFailed += s.backgroundSnapshot.SpeedTotal - observed
-		}
-	}
 }
 
 func (s *appSession) updateProgressSnapshotLocked(phase string, current int, total int, message string) {

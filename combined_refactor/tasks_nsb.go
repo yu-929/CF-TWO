@@ -521,7 +521,6 @@ func runNSBTask(ctx context.Context, session *appSession, fileName, fileContent,
 			}
 			continue
 		}
-		// 判断是否为域名：包含字母或者解析结果与输入不同
 		isDomain := strings.ContainsFunc(host, func(r rune) bool {
 			return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 		}) || (len(resolvedIPs) == 1 && resolvedIPs[0] != host)

@@ -1857,8 +1857,8 @@
             </div>
             <div class="background-status-grid">
                 <div class="background-status-item" style="grid-column:1/-1;"><span class="background-status-label">数据来源</span><div class="background-status-value" id="backgroundSource">-</div></div>
-                <div class="background-status-item"><span class="background-status-label">阶段</span><div class="background-status-value" id="backgroundPhase">-</div></div>
-                <div class="background-status-item"><span class="background-status-label">进度</span><div class="background-status-value" id="backgroundProgressText">-</div></div>
+                <div class="background-status-item" style="grid-column:span 2;"><span class="background-status-label">阶段</span><div class="background-status-value" id="backgroundPhase">-</div></div>
+                <div class="background-status-item" style="grid-column:span 2;"><span class="background-status-label">进度</span><div class="background-status-value" id="backgroundProgressText">-</div></div>
                 <div class="background-status-item background-status-wide-full"><span class="background-status-label">扫描结果</span><div class="background-status-value" id="backgroundResultCount">0</div></div>
                 <div class="background-status-item background-status-wide-full"><span class="background-status-label">测速结果</span><div class="background-status-value" id="backgroundSpeedCount">0</div></div>
             </div>
@@ -3137,27 +3137,25 @@
             const total = snapshot.total || 0;
             const percent = Number.isFinite(snapshot.percent) ? snapshot.percent : (total > 0 ? current / total * 100 : 0);
             document.getElementById('backgroundProgressText').textContent = total > 0 ? `${current}/${total} (${Math.round(percent)}%)` : '-';
-            const formatStats = (total, success, failed, qualified) => {
-                const safeTotal = Math.max(total || 0, success || 0, failed || 0, qualified || 0);
+            const formatStats = (success, failed, qualified) => {
                 const safeSuccess = success || 0;
                 const safeFailed = failed || 0;
+                const safeTotal = safeSuccess + safeFailed;
                 const safeQualified = qualified ?? safeSuccess;
                 const qualifiedRate = safeTotal > 0 ? `${Math.round(safeQualified / safeTotal * 100)}%` : '-';
                 return [
-                    ['总数', safeTotal],
+                    ['测试数', safeTotal],
                     ['合格率', qualifiedRate],
                     ['成功数', safeSuccess],
                     ['失败数', safeFailed],
                 ].map(([label, value]) => `<span class="background-stat-cell"><span class="background-stat-name">${label}</span><span class="background-stat-number">${value}</span></span>`).join('');
             };
-            const scanTotal = snapshot.scanTotal || snapshot.resultCount || snapshot.testCount || 0;
-            const scanSuccess = snapshot.scanSuccess || snapshot.resultCount || snapshot.testCount || 0;
-            const scanFailed = snapshot.scanFailed || Math.max(scanTotal - scanSuccess, 0);
-            const speedTotal = snapshot.speedTotal || snapshot.speedCount || 0;
-            const speedSuccess = snapshot.speedSuccess || snapshot.speedCount || 0;
-            const speedFailed = snapshot.speedFailed || Math.max(speedTotal - speedSuccess, 0);
-            document.getElementById('backgroundResultCount').innerHTML = `<div class="background-stat-grid">${formatStats(scanTotal, scanSuccess, scanFailed, scanSuccess)}</div>`;
-            document.getElementById('backgroundSpeedCount').innerHTML = `<div class="background-stat-grid">${formatStats(speedTotal, speedSuccess, speedFailed, snapshot.speedQualified || 0)}</div>`;
+            const scanSuccess = snapshot.scanSuccess || 0;
+            const scanFailed = snapshot.scanFailed || 0;
+            const speedSuccess = snapshot.speedSuccess || 0;
+            const speedFailed = snapshot.speedFailed || 0;
+            document.getElementById('backgroundResultCount').innerHTML = `<div class="background-stat-grid">${formatStats(scanSuccess, scanFailed, scanSuccess)}</div>`;
+            document.getElementById('backgroundSpeedCount').innerHTML = `<div class="background-stat-grid">${formatStats(speedSuccess, speedFailed, snapshot.speedQualified || 0)}</div>`;
             const followBtn = document.getElementById('btnFollowBackground');
             if (followBtn) {
                 followBtn.disabled = backgroundTaskFollowing;
