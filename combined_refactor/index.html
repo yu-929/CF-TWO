@@ -2940,7 +2940,7 @@
             const hint = getScanModeHint();
             if (!hint) return;
             if (mode === 'httping') {
-                hint.value = 'HTTPing 延迟比 TCPing 高属正常现象，不同模式数据不可互相比较';
+                hint.value = '测量 HTTP GET 请求的完整 TTFB（含 TLS 握手），因此HTTPing 延迟比 TCPing 高属正常现象，不同模式数据不可互相比较';
             } else {
                 hint.value = '仅测量 TCP 握手延迟，不同模式数据不可互相比较';
             }
