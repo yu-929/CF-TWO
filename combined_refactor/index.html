@@ -4360,7 +4360,15 @@
             updateBadge('testCount', 0);
             updateBadge('dcCount', 0);
 
-            if (!wsSend({ type: 'start_task', data: { ipType, threads, port, delay, scanMode: getScanMode() } })) {
+            if (!wsSend({ type: 'start_task', data: {
+                ipType, threads, port, delay, scanMode: getScanMode(),
+                autoSpeed: autoSpeed,
+                officialTargetDC: document.getElementById('officialTargetDC')?.value?.trim() || '',
+                officialSpeedPort: officialSpeedConfig.port,
+                officialSpeedURL: officialSpeedConfig.url,
+                officialSpeedMin: officialSpeedConfig.speedMin,
+                officialSpeedLimit: officialSpeedConfig.speedLimit,
+            } })) {
                 officialAutoSpeedPending = false;
                 officialAutoStage = '';
                 finishRunningTask('✨ 开始扫描与测试');

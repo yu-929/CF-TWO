@@ -140,8 +140,36 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if scanMode == "" {
 				scanMode = scanModeTCPing
 			}
-			session.startTaskNamed("官方优选扫描", "official", map[string]interface{}{"ipType": params.IPType, "threads": params.Threads, "port": params.Port, "delay": params.Delay, "scanMode": scanMode}, func(ctx context.Context, session *appSession) {
+			autoSpeed := params.AutoSpeed && params.OfficialSpeedLimit > 0
+			session.startTaskNamed("官方优选扫描", "official", map[string]interface{}{"ipType": params.IPType, "threads": params.Threads, "port": params.Port, "delay": params.Delay, "scanMode": scanMode, "autoSpeed": autoSpeed}, func(ctx context.Context, session *appSession) {
 				runOfficialTask(ctx, session, params.IPType, params.Threads, params.Port, params.Delay, scanMode)
+				if ctx.Err() != nil || !autoSpeed || !session.isBackgroundTask() {
+					return
+				}
+				dc := strings.TrimSpace(params.OfficialTargetDC)
+				if dc == "" {
+					session.scanMutex.Lock()
+					copy := append([]ScanResult(nil), session.scanResults...)
+					session.scanMutex.Unlock()
+					dc = pickBestDataCenter(copy)
+				}
+				if dc == "" || ctx.Err() != nil {
+					return
+				}
+				runDetailedTest(ctx, session, dc, params.OfficialSpeedPort, params.Delay, scanMode)
+				if ctx.Err() != nil || !session.isBackgroundTask() || params.OfficialSpeedLimit <= 0 {
+					return
+				}
+				speedURL := strings.TrimSpace(params.OfficialSpeedURL)
+				if speedURL == "" || isAutoSpeedURL(speedURL) {
+					speedURL = speedTestURL
+				}
+				session.testMutex.Lock()
+				results := append([]TestResult(nil), session.testResults...)
+				session.testMutex.Unlock()
+				if len(results) > 0 {
+					runOfficialSpeedBatch(ctx, session, params.OfficialSpeedPort, speedURL, params.OfficialSpeedLimit, params.OfficialSpeedMin, results, false)
+				}
 			})
 		},
 		"start_test": func(data json.RawMessage) {

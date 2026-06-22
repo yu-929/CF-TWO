@@ -8,11 +8,17 @@ type wsRequest struct {
 }
 
 type startTaskRequest struct {
-	IPType   int    `json:"ipType"`
-	Threads  int    `json:"threads"`
-	Port     int    `json:"port"`
-	Delay    int    `json:"delay"`
-	ScanMode string `json:"scanMode"`
+	IPType            int     `json:"ipType"`
+	Threads           int     `json:"threads"`
+	Port              int     `json:"port"`
+	Delay             int     `json:"delay"`
+	ScanMode          string  `json:"scanMode"`
+	AutoSpeed         bool    `json:"autoSpeed"`
+	OfficialTargetDC  string  `json:"officialTargetDC"`
+	OfficialSpeedPort int     `json:"officialSpeedPort"`
+	OfficialSpeedURL  string  `json:"officialSpeedURL"`
+	OfficialSpeedMin  float64 `json:"officialSpeedMin"`
+	OfficialSpeedLimit int    `json:"officialSpeedLimit"`
 }
 
 type startTestRequest struct {
