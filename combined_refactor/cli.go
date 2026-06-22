@@ -126,7 +126,9 @@ var cliResultFields = []cliResultField{
 	{Key: "ip", Label: "IP地址"},
 	{Key: "port", Label: "端口号"},
 	{Key: "tls", Label: "TLS"},
+	{Key: "lossRate", Label: "丢包率"},
 	{Key: "latency", Label: "网络延迟"},
+	{Key: "scanMode", Label: "扫描方式"},
 	{Key: "speed", Label: "下载速度"},
 	{Key: "outboundIP", Label: "出站IP"},
 	{Key: "ipType", Label: "IP类型"},
@@ -1024,7 +1026,7 @@ func runOfficialCLI(cfg *cliConfig) error {
 		dc = pickBestDataCenter(scanResults)
 		if dc == "" {
 			fmt.Printf("%s[official]%s 无法确定数据中心，仅输出扫描结果\n", ansiYellow, ansiReset)
-			return writeCLIExportAndMaybeUpload(cfg, officialScanRows(scanResults), "official-scan")
+			return writeCLIExportAndMaybeUpload(cfg, officialScanRows(scanResults, scanMode), "official-scan")
 		}
 		fmt.Printf("%s[official]%s 自动选择数据中心: %s\n", ansiGreen, ansiReset, colorize(dc, ansiBold+ansiGreen))
 	}
@@ -1051,7 +1053,7 @@ func runOfficialCLI(cfg *cliConfig) error {
 		fmt.Printf("%s[official]%s 开始测速：目标上限=%d，测速阈值=%.2fMB/s\n", ansiGreen, ansiReset, cfg.speedLimit, cfg.speedMin)
 		results = runOfficialSpeedTests(context.Background(), session, results, cfg.port, cfg.speedLimit, cfg.speedMin)
 	}
-	return writeCLIExportAndMaybeUpload(cfg, officialResultRows(scanResults, results), "official")
+	return writeCLIExportAndMaybeUpload(cfg, officialResultRows(scanResults, results, scanMode), "official")
 }
 
 func runNSBCLI(cfg *cliConfig) error {
@@ -1741,17 +1743,18 @@ func applyCLICustomFields(rows []cliResultRow, fields []cliCustomField) []cliRes
 	return rows
 }
 
-func officialScanRows(scanResults []ScanResult) []cliResultRow {
+func officialScanRows(scanResults []ScanResult, scanMode string) []cliResultRow {
 	rows := make([]cliResultRow, 0, len(scanResults))
+	modeLabel := scanModeLabel(scanMode)
 	for _, res := range scanResults {
-		rows = append(rows, cliResultRow{"ip": res.IP, "port": strconv.Itoa(res.Port), "ipport": fmt.Sprintf("%s:%d", res.IP, res.Port), "dc": res.DataCenter, "dcCountry": res.DCCountry, "region": res.Region, "city": res.City, "latency": res.LatencyStr})
+		rows = append(rows, cliResultRow{"ip": res.IP, "port": strconv.Itoa(res.Port), "ipport": fmt.Sprintf("%s:%d", res.IP, res.Port), "dc": res.DataCenter, "dcCountry": res.DCCountry, "region": res.Region, "city": res.City, "latency": res.LatencyStr, "scanMode": modeLabel})
 	}
 	return rows
 }
 
-func officialResultRows(scanResults []ScanResult, testResults []TestResult) []cliResultRow {
+func officialResultRows(scanResults []ScanResult, testResults []TestResult, scanMode string) []cliResultRow {
 	if len(testResults) == 0 {
-		rows := officialScanRows(scanResults)
+		rows := officialScanRows(scanResults, scanMode)
 		sortOfficialRows(rows)
 		return rows
 	}
@@ -1759,6 +1762,7 @@ func officialResultRows(scanResults []ScanResult, testResults []TestResult) []cl
 	for _, res := range scanResults {
 		scanByIP[res.IP] = res
 	}
+	modeLabel := scanModeLabel(scanMode)
 	rows := make([]cliResultRow, 0, len(testResults))
 	for _, res := range testResults {
 		scan := scanByIP[res.IP]
@@ -1766,7 +1770,7 @@ func officialResultRows(scanResults []ScanResult, testResults []TestResult) []cl
 		if port == 0 {
 			port = res.Port
 		}
-		rows = append(rows, cliResultRow{"ip": res.IP, "port": strconv.Itoa(port), "ipport": fmt.Sprintf("%s:%d", res.IP, port), "dc": scan.DataCenter, "dcCountry": scan.DCCountry, "region": scan.Region, "city": scan.City, "latency": fmt.Sprintf("%dms", res.AvgLatency/time.Millisecond), "speed": res.Speed})
+		rows = append(rows, cliResultRow{"ip": res.IP, "port": strconv.Itoa(port), "ipport": fmt.Sprintf("%s:%d", res.IP, port), "dc": scan.DataCenter, "dcCountry": scan.DCCountry, "region": scan.Region, "city": scan.City, "latency": fmt.Sprintf("%dms", res.AvgLatency/time.Millisecond), "speed": res.Speed, "scanMode": modeLabel})
 		if rows[len(rows)-1]["dc"] == "" {
 			rows[len(rows)-1]["dc"] = res.DataCenter
 			rows[len(rows)-1]["dcCountry"] = res.DCCountry

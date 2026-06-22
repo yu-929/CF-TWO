@@ -839,7 +839,7 @@ func runNSBTask(ctx context.Context, session *appSession, fileName, fileContent,
 		completionMessage = "任务已手动终止，已整理当前可用结果"
 	}
 
-	if err := writeNSBCSV(outFile, nsbResults, speedTest, compact); err != nil {
+	if err := writeNSBCSV(outFile, nsbResults, speedTest, compact, scanMode); err != nil {
 		session.sendWSMessage("error", "导出 CSV 失败: "+err.Error())
 		return
 	}
@@ -847,8 +847,8 @@ func runNSBTask(ctx context.Context, session *appSession, fileName, fileContent,
 		session.sendWSMessage("nsb_csv_ready", map[string]interface{}{"file": outFile, "status": completionStatus, "message": completionMessage, "rows": len(nsbResults), "qualifiedCount": qualifiedCount})
 	}
 
-	headers := nsbCSVHeaders(compact)
-	rows := nsbCSVRows(nsbResults, speedTest > 0, compact)
+	headers := nsbCSVHeaders(compact, scanMode)
+	rows := nsbCSVRows(nsbResults, speedTest > 0, compact, scanMode)
 
 	session.sendWSMessage("nsb_csv_complete", nsbCSVCompletePayload{Headers: headers, Rows: rows, File: outFile, Status: completionStatus, Message: completionMessage, QualifiedCount: qualifiedCount})
 	session.sendWSMessage("log", fmt.Sprintf("非标优选完成，结果文件: %s", outFile))
@@ -1096,7 +1096,14 @@ func runNSBSpeedWorkers(ctx context.Context, results []iptestResult, maxWorkers,
 	return wasCanceled
 }
 
-func writeNSBCSV(outFile string, results []iptestResult, speedTest int, compact bool) error {
+func scanModeLabel(scanMode string) string {
+	if scanMode == scanModeHTTPing {
+		return "HTTPing"
+	}
+	return "TCPing"
+}
+
+func writeNSBCSV(outFile string, results []iptestResult, speedTest int, compact bool, scanMode string) error {
 	outFile = safeFilename(outFile)
 	file, err := os.Create(outFile)
 	if err != nil {
@@ -1111,12 +1118,12 @@ func writeNSBCSV(outFile string, results []iptestResult, speedTest int, compact 
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	if err := writer.Write(nsbCSVHeaders(compact)); err != nil {
+	if err := writer.Write(nsbCSVHeaders(compact, scanMode)); err != nil {
 		return err
 	}
 
 	for _, res := range results {
-		if err := writer.Write(nsbCSVRow(res, speedTest > 0, compact)); err != nil {
+		if err := writer.Write(nsbCSVRow(res, speedTest > 0, compact, scanMode)); err != nil {
 			return err
 		}
 	}
@@ -1124,24 +1131,31 @@ func writeNSBCSV(outFile string, results []iptestResult, speedTest int, compact 
 	return nil
 }
 
-func nsbCSVRows(results []iptestResult, includeSpeed bool, compact bool) [][]string {
+func nsbCSVRows(results []iptestResult, includeSpeed bool, compact bool, scanMode string) [][]string {
 	rows := make([][]string, 0, len(results))
 	for _, res := range results {
-		rows = append(rows, nsbCSVRow(res, includeSpeed, compact))
+		rows = append(rows, nsbCSVRow(res, includeSpeed, compact, scanMode))
 	}
 	return rows
 }
 
-func nsbCSVHeaders(compact bool) []string {
+func nsbCSVHeaders(compact bool, scanMode string) []string {
+	mode := scanModeLabel(scanMode)
+	insertMode := []string{"扫描方式", mode}
 	if compact {
-		return []string{"IP地址", "OriginalInput", "端口号", "TLS", "丢包率", "网络延迟", "下载速度", "出站IP", "IP类型", "数据中心", "源IP位置", "地区", "城市", "ASN号码", "ASN组织"}
+		h := []string{"IP地址", "OriginalInput", "端口号", "TLS", "丢包率"}
+		h = append(h, insertMode...)
+		h = append(h, "网络延迟", "下载速度", "出站IP", "IP类型", "数据中心", "源IP位置", "地区", "城市", "ASN号码", "ASN组织")
+		return h
 	}
-	headers := []string{"IP地址", "OriginalInput", "端口号", "TLS", "丢包率", "网络延迟", "下载速度", "出站IP", "IP类型", "数据中心", "源IP位置", "地区", "城市", "ASN号码", "ASN组织"}
-	headers = append(headers, "访问协议", "TLS版本", "SNI", "HTTP版本", "WARP", "Gateway", "RBI", "密钥交换", "时间戳")
-	return headers
+	h := []string{"IP地址", "OriginalInput", "端口号", "TLS", "丢包率"}
+	h = append(h, insertMode...)
+	h = append(h, "网络延迟", "下载速度", "出站IP", "IP类型", "数据中心", "源IP位置", "地区", "城市", "ASN号码", "ASN组织")
+	h = append(h, "访问协议", "TLS版本", "SNI", "HTTP版本", "WARP", "Gateway", "RBI", "密钥交换", "时间戳")
+	return h
 }
 
-func nsbCSVRow(res iptestResult, includeSpeed bool, compact bool) []string {
+func nsbCSVRow(res iptestResult, includeSpeed bool, compact bool, scanMode string) []string {
 	speed := "-"
 	if includeSpeed {
 		speed = res.speedText
@@ -1160,6 +1174,7 @@ func nsbCSVRow(res iptestResult, includeSpeed bool, compact bool) []string {
 			strconv.Itoa(res.port),
 			strconv.FormatBool(res.visitScheme == "https"),
 			fmt.Sprintf("%.0f%%", res.lossRate*100),
+			scanModeLabel(scanMode),
 			res.latency,
 			speed,
 			res.outboundIP,
@@ -1178,6 +1193,7 @@ func nsbCSVRow(res iptestResult, includeSpeed bool, compact bool) []string {
 		strconv.Itoa(res.port),
 		strconv.FormatBool(res.visitScheme == "https"),
 		fmt.Sprintf("%.0f%%", res.lossRate*100),
+		scanModeLabel(scanMode),
 		res.latency,
 		speed,
 		res.outboundIP,
