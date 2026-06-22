@@ -24,7 +24,7 @@ func latencyMultiplier(scanMode string, isTLS bool) float64 {
 		return 1.0
 	}
 	if isTLS {
-		return 2.5
+		return 4.0
 	}
 	return 1.3
 }

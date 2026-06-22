@@ -186,6 +186,10 @@ func scanOfficialHTTP(ctx context.Context, ip string, port int, delay int) (*Sca
 
 func testIPLatency(ctx context.Context, ip string, port int, delay int, scanMode string) (*TestResult, string, string) {
 	isHTTPing := scanMode == scanModeHTTPing
+	attempts := 10
+	if isHTTPing {
+		attempts = 3
+	}
 	mul := 1.0
 	if isHTTPing {
 		mul = latencyMultiplier(scanModeHTTPing, isTLSPort(port))
@@ -203,7 +207,7 @@ func testIPLatency(ctx context.Context, ip string, port int, delay int, scanMode
 	minLatency := time.Duration(1<<63 - 1)
 	maxLatency := time.Duration(0)
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < attempts; i++ {
 		select {
 		case <-ctx.Done():
 			return nil, "test_canceled", ctx.Err().Error()
@@ -252,7 +256,7 @@ func testIPLatency(ctx context.Context, ip string, port int, delay int, scanMode
 	}
 
 	avgLatency := totalLatency / time.Duration(successCount)
-	lossRate := float64(10-successCount) / 10.0
+	lossRate := float64(attempts-successCount) / float64(attempts)
 	return &TestResult{
 		IP:         ip,
 		Port:       port,

@@ -58,7 +58,7 @@ CLI 模式：
 - **TCPing**：测量 TCP 握手延迟，基准值。
 - **HTTPing**：测量 HTTP TTFB（Time To First Byte），延迟比 TCPing 高属正常现象。延迟阈值和渲染颜色已按倍率自动缩放，倍率仅为延迟等级参考值，非精确换算：
   - 无 TLS（HTTP 端口）：×1.3
-  - 有 TLS（HTTPS 端口）：×2.5
+  - 有 TLS（HTTPS 端口）：×4.0
 
 ### 官方优选
 
