@@ -1996,6 +1996,7 @@
                                 <th>落地区域</th>
                                 <th>地区</th>
                                 <th>城市</th>
+                                <th>扫描方式</th>
                                 <th>丢包率</th>
                                 <th>最小延迟</th>
                                 <th>最大延迟</th>
@@ -2930,6 +2931,10 @@
             return el || null;
         }
 
+        function getScanModeLabel() {
+            return getScanMode() === 'httping' ? 'HTTPing' : 'TCPing';
+        }
+
         function updateScanModeHint() {
             const mode = getScanMode();
             const hint = getScanModeHint();
@@ -3385,7 +3390,7 @@
             tbody.innerHTML = '';
 
             if (mode === 'official') {
-                thead.innerHTML = '<tr><th>IP</th><th>端口</th><th>数据中心</th><th>落地区域</th><th>地区</th><th>城市</th><th>延迟</th></tr>';
+                thead.innerHTML = '<tr><th>IP</th><th>端口</th><th>数据中心</th><th>落地区域</th><th>地区</th><th>城市</th><th>扫描方式</th><th>延迟</th></tr>';
             } else {
                 const headers = getVisibleNSBHeaders();
                 const headerRow = headers.map(h => `<th>${h}</th>`).join('');
@@ -3508,7 +3513,7 @@
             const tbody = document.querySelector('#scanTable tbody');
             const latencyVal = parseFloat(row.LatencyStr);
             const latencyColor = getLatencyColor(latencyVal);
-            const html = `<tr><td>${renderIPCell(row.IP, row.OriginalInput || row.originalInput)}</td><td><span class="copy-ip" onclick="copyToClipboard('${row.Port ?? ''}', event)">${row.Port ?? '-'}</span></td><td>${row.DataCenter || '-'}</td><td>${row.DCCountry || '-'}</td><td>${row.Region || '-'}</td><td>${row.City || '-'}</td><td style="color:${latencyColor}; font-weight:600;">${row.LatencyStr || '-'}</td></tr>`;
+            const html = `<tr><td>${renderIPCell(row.IP, row.OriginalInput || row.originalInput)}</td><td><span class="copy-ip" onclick="copyToClipboard('${row.Port ?? ''}', event)">${row.Port ?? '-'}</span></td><td>${row.DataCenter || '-'}</td><td>${row.DCCountry || '-'}</td><td>${row.Region || '-'}</td><td>${row.City || '-'}</td><td>${getScanModeLabel()}</td><td style="color:${latencyColor}; font-weight:600;">${row.LatencyStr || '-'}</td></tr>`;
             tbody.insertAdjacentHTML('beforeend', html);
         }
 
@@ -3633,8 +3638,8 @@
             updateNSBSpeedButtons();
         }
 
-        const NSB_LIVE_HEADERS = ['IP地址', 'OriginalInput', '端口号', 'TLS', '丢包率', '网络延迟', '下载速度', '出站IP', 'IP类型', '数据中心', '源IP位置', '地区', '城市', 'ASN号码', 'ASN组织', '访问协议', 'TLS版本', 'SNI', 'HTTP版本', 'WARP', 'Gateway', 'RBI', '密钥交换', '时间戳'];
-        const NSB_COMPACT_HEADERS = ['IP地址', 'OriginalInput', '端口号', 'TLS', '丢包率', '网络延迟', '下载速度', '出站IP', 'IP类型', '数据中心', '源IP位置', '地区', '城市', 'ASN号码', 'ASN组织'];
+        const NSB_LIVE_HEADERS = ['IP地址', 'OriginalInput', '端口号', 'TLS', '丢包率', '扫描方式', '网络延迟', '下载速度', '出站IP', 'IP类型', '数据中心', '源IP位置', '地区', '城市', 'ASN号码', 'ASN组织', '访问协议', 'TLS版本', 'SNI', 'HTTP版本', 'WARP', 'Gateway', 'RBI', '密钥交换', '时间戳'];
+        const NSB_COMPACT_HEADERS = ['IP地址', 'OriginalInput', '端口号', 'TLS', '丢包率', '扫描方式', '网络延迟', '下载速度', '出站IP', 'IP类型', '数据中心', '源IP位置', '地区', '城市', 'ASN号码', 'ASN组织'];
 
         function normalizeNSBHeader(header) {
             if (header === 'IP') return 'IP地址';
@@ -3674,7 +3679,7 @@
 
         function nsbRowToArray(row) {
             return [
-                row.ip || '', row.originalInput || '', row.port || '', row.tls ?? '-', row.lossRate || '0%', row.latency || '-', row.speed || '-',
+                row.ip || '', row.originalInput || '', row.port || '', row.tls ?? '-', row.lossRate || '0%', getScanModeLabel(), row.latency || '-', row.speed || '-',
                 row.outboundIP || '-', row.ipType || '-', row.dc || '-', row.loc || '-',
                 row.region || '-', row.city || '-', row.asnNumber || '-', row.asnOrg || '-',
                 row.visitScheme || '-', row.tlsVersion || '-', row.sni || '-', row.httpVersion || '-',
@@ -3996,7 +4001,7 @@
             const isTesting = currentSpeedTestingIP === res.IP;
             const speedDisabled = isTesting || isTaskRunning || officialBatchSpeedRunning;
             const buttonText = isTesting ? '测速中' : (res.Speed ? '重新测速' : '测速');
-            const row = `<tr class="${speedStatus === 'qualified' ? 'row-qualified' : (speedStatus === 'unqualified' ? 'row-unqualified' : '')}"><td>${renderIPCell(res.IP, res.OriginalInput || res.originalInput)}</td><td><span class="copy-ip" onclick="copyToClipboard('${port}', event)">${port}</span></td><td>${meta.dc || '-'}</td><td>${meta.dcCountry || '-'}</td><td>${meta.region || '-'}</td><td>${meta.city || '-'}</td><td>${(res.LossRate * 100).toFixed(0)}%</td><td>${(res.MinLatency / 1_000_000).toFixed(0)} ms</td><td>${(res.MaxLatency / 1_000_000).toFixed(0)} ms</td><td style="color:${getLatencyColor(res.AvgLatency / 1_000_000)}; font-weight:600;">${(res.AvgLatency / 1_000_000).toFixed(0)} ms</td><td style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:none;"><span class="speed-result" id="speed-val-${res.IP.replace(/[:.]/g, '_')}" style="color:${speedColor};"><span>${speedText}</span>${renderSpeedStatusTag(speedStatus)}</span><button class="action-btn speed-btn" id="btn-speed-${res.IP.replace(/[:.]/g, '_')}" onclick="runSpeedTest('${res.IP}')" ${speedDisabled ? 'disabled' : ''}>${buttonText}</button></td></tr>`;
+            const row = `<tr class="${speedStatus === 'qualified' ? 'row-qualified' : (speedStatus === 'unqualified' ? 'row-unqualified' : '')}"><td>${renderIPCell(res.IP, res.OriginalInput || res.originalInput)}</td><td><span class="copy-ip" onclick="copyToClipboard('${port}', event)">${port}</span></td><td>${meta.dc || '-'}</td><td>${meta.dcCountry || '-'}</td><td>${meta.region || '-'}</td><td>${meta.city || '-'}</td><td>${getScanModeLabel()}</td><td>${(res.LossRate * 100).toFixed(0)}%</td><td>${(res.MinLatency / 1_000_000).toFixed(0)} ms</td><td>${(res.MaxLatency / 1_000_000).toFixed(0)} ms</td><td style="color:${getLatencyColor(res.AvgLatency / 1_000_000)}; font-weight:600;">${(res.AvgLatency / 1_000_000).toFixed(0)} ms</td><td style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:none;"><span class="speed-result" id="speed-val-${res.IP.replace(/[:.]/g, '_')}" style="color:${speedColor};"><span>${speedText}</span>${renderSpeedStatusTag(speedStatus)}</span><button class="action-btn speed-btn" id="btn-speed-${res.IP.replace(/[:.]/g, '_')}" onclick="runSpeedTest('${res.IP}')" ${speedDisabled ? 'disabled' : ''}>${buttonText}</button></td></tr>`;
             document.querySelector('#testTable tbody').insertAdjacentHTML('beforeend', row);
         }
 
