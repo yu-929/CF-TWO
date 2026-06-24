@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"net/http"
 	"sort"
@@ -14,12 +13,17 @@ import (
 	"time"
 )
 
-func scanOfficialIP(ctx context.Context, ip string, port int) (*ScanResult, string, string) {
+func scanOfficialIP(ctx context.Context, ip string, port int, delay int) (*ScanResult, string, string) {
 	dialer := &net.Dialer{Timeout: timeout}
 	start := time.Now()
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
 	if err != nil {
 		return nil, "tcp_connect_failed", err.Error()
+	}
+
+	if delay > 0 && time.Since(start).Milliseconds() > int64(delay) {
+		conn.Close()
+		return nil, "delay_exceeded", fmt.Sprintf("connect=%dms, delay=%dms", time.Since(start).Milliseconds(), delay)
 	}
 
 	connClosed := false
@@ -89,7 +93,108 @@ func scanOfficialIP(ctx context.Context, ip string, port int) (*ScanResult, stri
 	return res, "", ""
 }
 
-func testIPLatency(ctx context.Context, ip string, port int, delay int) (*TestResult, string, string) {
+func scanOfficialHTTP(ctx context.Context, ip string, port int, delay int) (*ScanResult, string, string) {
+	mul := latencyMultiplier(scanModeHTTPing, isTLSPort(port))
+	effectiveDelay := int(float64(delay) * mul)
+
+	dialer := &net.Dialer{Timeout: timeout}
+	start := time.Now()
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+	if err != nil {
+		return nil, "tcp_connect_failed", err.Error()
+	}
+	if delay > 0 {
+		if time.Since(start).Milliseconds() > int64(effectiveDelay) {
+			conn.Close()
+			return nil, "delay_exceeded", fmt.Sprintf("connect=%dms, effective_delay=%dms", time.Since(start).Milliseconds(), effectiveDelay)
+		}
+	}
+
+	connClosed := false
+	closeConn := func() {
+		if !connClosed {
+			connClosed = true
+			conn.Close()
+		}
+	}
+	defer closeConn()
+
+	scheme := "http://"
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return conn, nil
+		},
+	}
+	if isTLSPort(port) {
+		scheme = "https://"
+		transport.TLSClientConfig = tlsConfigWithRootCAs("speed.cloudflare.com")
+	}
+
+	client := http.Client{
+		Transport: wrapDebugTransport("official-httping", transport),
+		Timeout:   3 * time.Second,
+	}
+
+	reqStart := time.Now()
+	req, err := http.NewRequestWithContext(ctx, "GET", scheme+requestURL, nil)
+	if err != nil {
+		return nil, "request_create_failed", err.Error()
+	}
+	req.Host = "speed.cloudflare.com"
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Close = true
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "http_get_failed", err.Error()
+	}
+	reqDuration := time.Since(reqStart)
+
+	if delay > 0 && reqDuration.Milliseconds() > int64(effectiveDelay) {
+		resp.Body.Close()
+		return nil, "delay_exceeded", fmt.Sprintf("ttfb=%dms, effective_delay=%dms", reqDuration.Milliseconds(), effectiveDelay)
+	}
+
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	resp.Body.Close()
+	if err != nil {
+		return nil, "trace_read_failed", err.Error()
+	}
+	bodyStr := string(bodyBytes)
+	trace := parseTraceResponse(bodyStr)
+	dataCenter := strings.TrimSpace(trace["colo"])
+	if dataCenter == "" {
+		if debugMode {
+			sendLog(fmt.Sprintf("[official-httping-debug] trace missing colo: ip=%s port=%d body=%q", ip, port, strings.TrimSpace(bodyStr)))
+		}
+		return nil, "trace_missing_colo", strings.TrimSpace(bodyStr)
+	}
+
+	loc := locationMap[dataCenter]
+	res := &ScanResult{
+		IP:          ip,
+		Port:        port,
+		DataCenter:  dataCenter,
+		DCCountry:   loc.Cca2,
+		Region:      loc.Region,
+		City:        loc.City,
+		LatencyStr:  fmt.Sprintf("%dms", reqDuration.Milliseconds()),
+		TCPDuration: reqDuration,
+	}
+	return res, "", ""
+}
+
+func testIPLatency(ctx context.Context, ip string, port int, delay int, scanMode string) (*TestResult, string, string) {
+	isHTTPing := scanMode == scanModeHTTPing
+	attempts := 10
+	if isHTTPing {
+		attempts = 3
+	}
+	mul := 1.0
+	if isHTTPing {
+		mul = latencyMultiplier(scanModeHTTPing, isTLSPort(port))
+	}
+	effectiveDelay := int(float64(delay) * mul)
 	dialerTimeout := time.Duration(delay) * time.Millisecond
 	if delay <= 0 {
 		dialerTimeout = 3 * time.Second
@@ -99,29 +204,39 @@ func testIPLatency(ctx context.Context, ip string, port int, delay int) (*TestRe
 	failureCount := 0
 	lastFailure := ""
 	var totalLatency time.Duration
-	minLatency := time.Duration(math.MaxInt64)
+	minLatency := time.Duration(1<<63 - 1)
 	maxLatency := time.Duration(0)
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < attempts; i++ {
 		select {
 		case <-ctx.Done():
 			return nil, "test_canceled", ctx.Err().Error()
 		default:
 		}
 
-		start := time.Now()
-		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
-		if err != nil {
-			failureCount++
-			lastFailure = err.Error()
-			continue
-		}
-		latency := time.Since(start)
-		if delay > 0 && latency > time.Duration(delay)*time.Millisecond {
+		var latency time.Duration
+		if isHTTPing {
+			latency, lastFailure = measureHTTPTTFB(ctx, ip, port, effectiveDelay)
+			if latency < 0 {
+				failureCount++
+				continue
+			}
+		} else {
+			start := time.Now()
+			conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+			if err != nil {
+				failureCount++
+				lastFailure = err.Error()
+				continue
+			}
+			latency = time.Since(start)
+			if delay > 0 && latency > time.Duration(delay)*time.Millisecond {
+				conn.Close()
+				failureCount++
+				lastFailure = fmt.Sprintf("latency %s exceeds delay %dms", latency, delay)
+				continue
+			}
 			conn.Close()
-			failureCount++
-			lastFailure = fmt.Sprintf("latency %s exceeds delay %dms", latency, delay)
-			continue
 		}
 		successCount++
 		totalLatency += latency
@@ -131,7 +246,6 @@ func testIPLatency(ctx context.Context, ip string, port int, delay int) (*TestRe
 		if latency > maxLatency {
 			maxLatency = latency
 		}
-		conn.Close()
 	}
 
 	if successCount == 0 {
@@ -142,7 +256,7 @@ func testIPLatency(ctx context.Context, ip string, port int, delay int) (*TestRe
 	}
 
 	avgLatency := totalLatency / time.Duration(successCount)
-	lossRate := float64(10-successCount) / 10.0
+	lossRate := float64(attempts-successCount) / float64(attempts)
 	return &TestResult{
 		IP:         ip,
 		Port:       port,
@@ -153,7 +267,50 @@ func testIPLatency(ctx context.Context, ip string, port int, delay int) (*TestRe
 	}, "", ""
 }
 
-func runOfficialTask(ctx context.Context, session *appSession, ipType int, scanMaxThreads int, port int) {
+func measureHTTPTTFB(ctx context.Context, ip string, port int, effectiveDelay int) (time.Duration, string) {
+	dialer := &net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+	if err != nil {
+		return -1, err.Error()
+	}
+	defer conn.Close()
+
+	scheme := "http://"
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return conn, nil
+		},
+	}
+	if isTLSPort(port) {
+		scheme = "https://"
+		transport.TLSClientConfig = tlsConfigWithRootCAs("speed.cloudflare.com")
+	}
+	client := http.Client{
+		Transport: wrapDebugTransport("official-httping-test", transport),
+		Timeout:   time.Duration(effectiveDelay)*time.Millisecond + time.Second,
+	}
+	reqStart := time.Now()
+	req, err := http.NewRequestWithContext(ctx, "GET", scheme+requestURL, nil)
+	if err != nil {
+		return -1, "request_create_failed"
+	}
+	req.Host = "speed.cloudflare.com"
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Close = true
+	resp, err := client.Do(req)
+	if err != nil {
+		return -1, "http_get_failed: " + err.Error()
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	ttfb := time.Since(reqStart)
+	if effectiveDelay > 0 && ttfb.Milliseconds() > int64(effectiveDelay) {
+		return -1, fmt.Sprintf("ttfb %s exceeds effective delay %dms", ttfb, effectiveDelay)
+	}
+	return ttfb, ""
+}
+
+func runOfficialTask(ctx context.Context, session *appSession, ipType int, scanMaxThreads int, port int, delay int, scanMode string) {
 	filename := "ips-v4.txt"
 	apiURL := "https://www.baipiao.eu.org/cloudflare/ips-v4"
 	if ipType == 6 {
@@ -215,7 +372,13 @@ func runOfficialTask(ctx context.Context, session *appSession, ipType int, scanM
 		default:
 		}
 
-		res, failureCategory, failureDetail := scanOfficialIP(ctx, ip, port)
+		var res *ScanResult
+		var failureCategory, failureDetail string
+		if scanMode == scanModeHTTPing {
+			res, failureCategory, failureDetail = scanOfficialHTTP(ctx, ip, port, delay)
+		} else {
+			res, failureCategory, failureDetail = scanOfficialIP(ctx, ip, port, delay)
+		}
 		if res == nil {
 			recordFailure(failureCategory, failureDetail)
 			return
@@ -287,7 +450,7 @@ func runOfficialTask(ctx context.Context, session *appSession, ipType int, scanM
 	session.sendWSMessage("scan_complete_wait_dc", dcList)
 }
 
-func runDetailedTest(ctx context.Context, session *appSession, selectedDC string, port int, delay int) {
+func runDetailedTest(ctx context.Context, session *appSession, selectedDC string, port int, delay int, scanMode string) {
 	var testIPList []string
 	scanByIP := make(map[string]ScanResult)
 	session.scanMutex.Lock()
@@ -345,7 +508,7 @@ func runDetailedTest(ctx context.Context, session *appSession, selectedDC string
 		default:
 		}
 
-		res, failureCategory, failureDetail := testIPLatency(ctx, ip, port, delay)
+		res, failureCategory, failureDetail := testIPLatency(ctx, ip, port, delay, scanMode)
 		if res == nil {
 			recordFailure(failureCategory, failureDetail)
 			return

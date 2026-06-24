@@ -88,10 +88,11 @@ jobs:
           filename="cfdata-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
           echo "Building ${filename}..."
           cd combined_refactor
-          go build -ldflags "-s -w -X main.appVersion=${{ steps.set-version.outputs.VERSION }}" -o ../release_assets/${filename} .
+          go build -trimpath -ldflags "-s -w -X main.appVersion=${{ steps.set-version.outputs.VERSION }}" -o ../release_assets/${filename} .
         env:
           GOARCH: ${{ matrix.goarch }}
           GOOS: ${{ matrix.goos }}
+          CGO_ENABLED: "0"
 
       - name: Generate SHA256
         run: |

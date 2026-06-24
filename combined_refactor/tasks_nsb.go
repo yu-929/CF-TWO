@@ -53,6 +53,149 @@ func resolveHostToIPs(ctx context.Context, host string, maxIPs int) ([]string, e
 	return result, nil
 }
 
+func scanNSBEntryHTTP(ctx context.Context, item string, fallbackPort int, enableTLS bool, delay int, targetDC string, inputIndex int) (*iptestResult, *nsbFailureRecord) {
+	mul := latencyMultiplier(scanModeHTTPing, enableTLS)
+	effectiveDelay := int(float64(delay) * mul)
+
+	parts := strings.Fields(item)
+	if len(parts) < 1 || len(parts) > 2 {
+		record := &nsbFailureRecord{index: inputIndex, phase: "scan", reason: "格式错误", detail: "需要每行格式为: IP [端口]"}
+		if len(parts) > 0 {
+			record.ipAddr = parts[0]
+		}
+		if len(parts) > 1 {
+			record.port = parts[1]
+		}
+		return nil, record
+	}
+	ipAddr := parts[0]
+	portStr := strconv.Itoa(fallbackPort)
+	if len(parts) == 2 {
+		portStr = parts[1]
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return nil, &nsbFailureRecord{index: inputIndex, ipAddr: ipAddr, port: portStr, phase: "scan", reason: "端口无效", detail: err.Error()}
+	}
+	if port <= 0 {
+		return nil, &nsbFailureRecord{index: inputIndex, ipAddr: ipAddr, port: portStr, phase: "scan", reason: "端口无效", detail: "端口必须大于 0"}
+	}
+
+	start := time.Now()
+	conn, err := dialContextWithTimeout(ctx, "tcp", net.JoinHostPort(ipAddr, strconv.Itoa(port)), timeout)
+	if err != nil {
+		return nil, &nsbFailureRecord{index: inputIndex, ipAddr: ipAddr, port: portStr, phase: "scan", reason: "TCP连接失败", detail: err.Error()}
+	}
+	if delay > 0 {
+		if time.Since(start).Milliseconds() > int64(effectiveDelay) {
+			conn.Close()
+			return nil, &nsbFailureRecord{index: inputIndex, ipAddr: ipAddr, port: portStr, phase: "scan", reason: "超过延迟阈值", detail: fmt.Sprintf("connect=%dms, effective_delay=%dms", time.Since(start).Milliseconds(), effectiveDelay)}
+		}
+	}
+
+	connClosed := false
+	closeConn := func() {
+		if !connClosed {
+			connClosed = true
+			conn.Close()
+		}
+	}
+	defer closeConn()
+
+	protocol := "http://"
+	if enableTLS {
+		protocol = "https://"
+	}
+
+	httpCtx, httpCancel := context.WithTimeout(ctx, maxDuration)
+	defer httpCancel()
+	transport := &http.Transport{
+		Dial: func(network, addr string) (net.Conn, error) {
+			return conn, nil
+		},
+		TLSClientConfig: tlsConfigWithRootCAs("speed.cloudflare.com"),
+	}
+	client := http.Client{
+		Transport: wrapDebugTransport("nsb-httping", transport),
+	}
+
+	reqStart := time.Now()
+	req, err := http.NewRequestWithContext(httpCtx, "GET", protocol+requestURL, nil)
+	if err != nil {
+		closeConn()
+		return nil, &nsbFailureRecord{index: inputIndex, ipAddr: ipAddr, port: portStr, phase: "scan", reason: "构建请求失败", detail: err.Error()}
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Close = true
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, &nsbFailureRecord{index: inputIndex, ipAddr: ipAddr, port: portStr, phase: "scan", reason: "HTTP请求失败", detail: err.Error()}
+	}
+	reqDuration := time.Since(reqStart)
+
+	if delay > 0 && reqDuration.Milliseconds() > int64(effectiveDelay) {
+		resp.Body.Close()
+		return nil, &nsbFailureRecord{index: inputIndex, ipAddr: ipAddr, port: portStr, phase: "scan", reason: "TTFB超过延迟阈值", detail: fmt.Sprintf("ttfb=%dms, effective_delay=%dms", reqDuration.Milliseconds(), effectiveDelay)}
+	}
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		errorBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		return nil, &nsbFailureRecord{
+			index:  inputIndex,
+			ipAddr: ipAddr,
+			port:   portStr,
+			phase:  "scan",
+			reason: "HTTP状态异常",
+			detail: formatHTTPFailureDetail(resp.Status, errorBody),
+		}
+	}
+
+	bodyData, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	resp.Body.Close()
+	if err != nil {
+		return nil, &nsbFailureRecord{index: inputIndex, ipAddr: ipAddr, port: portStr, phase: "scan", reason: "读取响应失败", detail: err.Error()}
+	}
+
+	trace := parseTraceResponse(string(bodyData))
+	dataCenter := trace["colo"]
+	locCode := trace["loc"]
+	if dataCenter == "" {
+		return nil, &nsbFailureRecord{index: inputIndex, ipAddr: ipAddr, port: portStr, phase: "scan", reason: "Trace校验失败", detail: "trace 中未返回 colo 字段"}
+	}
+	if strings.TrimSpace(targetDC) != "" && !strings.EqualFold(dataCenter, strings.TrimSpace(targetDC)) {
+		return nil, &nsbFailureRecord{index: inputIndex, ipAddr: ipAddr, port: portStr, phase: "scan", reason: "数据中心不匹配", detail: fmt.Sprintf("colo=%s, target=%s", dataCenter, targetDC)}
+	}
+
+	loc := locationMap[dataCenter]
+	asnNumber, asnOrg := lookupASN(trace["ip"])
+	return &iptestResult{
+		ipAddr:      ipAddr,
+		port:        port,
+		dataCenter:  dataCenter,
+		locCode:     locCode,
+		region:      loc.Region,
+		city:        loc.City,
+		latency:     fmt.Sprintf("%dms", reqDuration.Milliseconds()),
+		lossRate:    0,
+		tcpDuration: reqDuration,
+		outboundIP:  trace["ip"],
+		ipType:      getIPType(trace["ip"]),
+		asnNumber:   asnNumber,
+		asnOrg:      asnOrg,
+		visitScheme: trace["visit_scheme"],
+		tlsVersion:  trace["tls"],
+		sni:         trace["sni"],
+		httpVersion: trace["http"],
+		warp:        trace["warp"],
+		gateway:     trace["gateway"],
+		rbi:         trace["rbi"],
+		kex:         trace["kex"],
+		timestamp:   trace["ts"],
+	}, nil
+}
+
 func scanNSBEntry(ctx context.Context, item string, fallbackPort int, enableTLS bool, delay int, targetDC string, inputIndex int) (*iptestResult, *nsbFailureRecord) {
 	parts := strings.Fields(item)
 	if len(parts) < 1 || len(parts) > 2 {
@@ -460,7 +603,7 @@ done:
 	return float64(written) / duration.Seconds() / 1024, ""
 }
 
-func runNSBTask(ctx context.Context, session *appSession, fileName, fileContent, outFile string, maxThreads, fallbackPort, speedTest int, speedURL string, enableTLS bool, delay int, resultLimit int, targetDC string, speedMin float64, speedLimit int, compact bool) {
+func runNSBTask(ctx context.Context, session *appSession, fileName, fileContent, outFile string, maxThreads, fallbackPort, speedTest int, speedURL string, enableTLS bool, delay int, resultLimit int, targetDC string, speedMin float64, speedLimit int, compact bool, scanMode string) {
 	session.sendWSMessage("log", fmt.Sprintf("开始非标优选：%s", fileName))
 
 	tmpFile, err := os.CreateTemp("", "cfdata-nsb-*.txt")
@@ -586,7 +729,13 @@ func runNSBTask(ctx context.Context, session *appSession, fileName, fileContent,
 
 		entry := expandedEntries[idx]
 		item := fmt.Sprintf("%s %d", entry.ip, entry.port)
-		res, failure := scanNSBEntry(itemCtx, item, fallbackPort, enableTLS, delay, targetDC, idx)
+		var res *iptestResult
+		var failure *nsbFailureRecord
+		if scanMode == scanModeHTTPing {
+			res, failure = scanNSBEntryHTTP(itemCtx, item, fallbackPort, enableTLS, delay, targetDC, idx)
+		} else {
+			res, failure = scanNSBEntry(itemCtx, item, fallbackPort, enableTLS, delay, targetDC, idx)
+		}
 		if res != nil {
 			res.originalInput = entry.originalInput
 		}
@@ -691,7 +840,7 @@ func runNSBTask(ctx context.Context, session *appSession, fileName, fileContent,
 		completionMessage = "任务已手动终止，已整理当前可用结果"
 	}
 
-	if err := writeNSBCSV(outFile, nsbResults, speedTest, compact); err != nil {
+	if err := writeNSBCSV(outFile, nsbResults, speedTest, compact, scanMode); err != nil {
 		session.sendWSMessage("error", "导出 CSV 失败: "+err.Error())
 		return
 	}
@@ -699,8 +848,8 @@ func runNSBTask(ctx context.Context, session *appSession, fileName, fileContent,
 		session.sendWSMessage("nsb_csv_ready", map[string]interface{}{"file": outFile, "status": completionStatus, "message": completionMessage, "rows": len(nsbResults), "qualifiedCount": qualifiedCount})
 	}
 
-	headers := nsbCSVHeaders(compact)
-	rows := nsbCSVRows(nsbResults, speedTest > 0, compact)
+	headers := nsbCSVHeaders(compact, scanMode)
+	rows := nsbCSVRows(nsbResults, speedTest > 0, compact, scanMode)
 
 	session.sendWSMessage("nsb_csv_complete", nsbCSVCompletePayload{Headers: headers, Rows: rows, File: outFile, Status: completionStatus, Message: completionMessage, QualifiedCount: qualifiedCount})
 	session.sendWSMessage("log", fmt.Sprintf("非标优选完成，结果文件: %s", outFile))
@@ -948,7 +1097,14 @@ func runNSBSpeedWorkers(ctx context.Context, results []iptestResult, maxWorkers,
 	return wasCanceled
 }
 
-func writeNSBCSV(outFile string, results []iptestResult, speedTest int, compact bool) error {
+func scanModeLabel(scanMode string) string {
+	if scanMode == scanModeHTTPing {
+		return "HTTPing"
+	}
+	return "TCPing"
+}
+
+func writeNSBCSV(outFile string, results []iptestResult, speedTest int, compact bool, scanMode string) error {
 	outFile = safeFilename(outFile)
 	file, err := os.Create(outFile)
 	if err != nil {
@@ -963,12 +1119,12 @@ func writeNSBCSV(outFile string, results []iptestResult, speedTest int, compact 
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	if err := writer.Write(nsbCSVHeaders(compact)); err != nil {
+	if err := writer.Write(nsbCSVHeaders(compact, scanMode)); err != nil {
 		return err
 	}
 
 	for _, res := range results {
-		if err := writer.Write(nsbCSVRow(res, speedTest > 0, compact)); err != nil {
+		if err := writer.Write(nsbCSVRow(res, speedTest > 0, compact, scanMode)); err != nil {
 			return err
 		}
 	}
@@ -976,24 +1132,24 @@ func writeNSBCSV(outFile string, results []iptestResult, speedTest int, compact 
 	return nil
 }
 
-func nsbCSVRows(results []iptestResult, includeSpeed bool, compact bool) [][]string {
+func nsbCSVRows(results []iptestResult, includeSpeed bool, compact bool, scanMode string) [][]string {
 	rows := make([][]string, 0, len(results))
 	for _, res := range results {
-		rows = append(rows, nsbCSVRow(res, includeSpeed, compact))
+		rows = append(rows, nsbCSVRow(res, includeSpeed, compact, scanMode))
 	}
 	return rows
 }
 
-func nsbCSVHeaders(compact bool) []string {
+func nsbCSVHeaders(compact bool, scanMode string) []string {
 	if compact {
-		return []string{"IP地址", "OriginalInput", "端口号", "TLS", "丢包率", "网络延迟", "下载速度", "出站IP", "IP类型", "数据中心", "源IP位置", "地区", "城市", "ASN号码", "ASN组织"}
+		return []string{"IP地址", "OriginalInput", "端口号", "TLS", "丢包率", "扫描方式", "网络延迟", "下载速度", "出站IP", "IP类型", "数据中心", "源IP位置", "地区", "城市", "ASN号码", "ASN组织"}
 	}
-	headers := []string{"IP地址", "OriginalInput", "端口号", "TLS", "丢包率", "网络延迟", "下载速度", "出站IP", "IP类型", "数据中心", "源IP位置", "地区", "城市", "ASN号码", "ASN组织"}
+	headers := []string{"IP地址", "OriginalInput", "端口号", "TLS", "丢包率", "扫描方式", "网络延迟", "下载速度", "出站IP", "IP类型", "数据中心", "源IP位置", "地区", "城市", "ASN号码", "ASN组织"}
 	headers = append(headers, "访问协议", "TLS版本", "SNI", "HTTP版本", "WARP", "Gateway", "RBI", "密钥交换", "时间戳")
 	return headers
 }
 
-func nsbCSVRow(res iptestResult, includeSpeed bool, compact bool) []string {
+func nsbCSVRow(res iptestResult, includeSpeed bool, compact bool, scanMode string) []string {
 	speed := "-"
 	if includeSpeed {
 		speed = res.speedText
@@ -1012,6 +1168,7 @@ func nsbCSVRow(res iptestResult, includeSpeed bool, compact bool) []string {
 			strconv.Itoa(res.port),
 			strconv.FormatBool(res.visitScheme == "https"),
 			fmt.Sprintf("%.0f%%", res.lossRate*100),
+			scanModeLabel(scanMode),
 			res.latency,
 			speed,
 			res.outboundIP,
@@ -1030,6 +1187,7 @@ func nsbCSVRow(res iptestResult, includeSpeed bool, compact bool) []string {
 		strconv.Itoa(res.port),
 		strconv.FormatBool(res.visitScheme == "https"),
 		fmt.Sprintf("%.0f%%", res.lossRate*100),
+		scanModeLabel(scanMode),
 		res.latency,
 		speed,
 		res.outboundIP,

@@ -14,8 +14,20 @@ import (
 )
 
 const (
-	requestURL = "speed.cloudflare.com/cdn-cgi/trace"
+	requestURL       = "speed.cloudflare.com/cdn-cgi/trace"
+	scanModeTCPing   = "tcping"
+	scanModeHTTPing  = "httping"
 )
+
+func latencyMultiplier(scanMode string, isTLS bool) float64 {
+	if scanMode != scanModeHTTPing {
+		return 1.0
+	}
+	if isTLS {
+		return 4.0
+	}
+	return 1.3
+}
 
 const (
 	timeout     = 3 * time.Second
@@ -260,6 +272,7 @@ type backgroundTaskSnapshot struct {
 	SpeedQualified int                    `json:"speedQualified"`
 	TestCount      int                    `json:"testCount"`
 	DCCount        int                    `json:"dcCount"`
+	DCInfo         string                 `json:"dcInfo,omitempty"`
 	Running        bool                   `json:"running"`
 	StartedAt      time.Time              `json:"startedAt"`
 	UpdatedAt      time.Time              `json:"updatedAt"`

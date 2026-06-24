@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -136,8 +138,40 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if params.Delay < 0 {
 				params.Delay = 0
 			}
-			session.startTaskNamed("官方优选扫描", "official", map[string]interface{}{"ipType": params.IPType, "threads": params.Threads, "port": params.Port, "delay": params.Delay}, func(ctx context.Context, session *appSession) {
-				runOfficialTask(ctx, session, params.IPType, params.Threads, params.Port)
+			scanMode := params.ScanMode
+			if scanMode == "" {
+				scanMode = scanModeTCPing
+			}
+			autoSpeed := params.AutoSpeed && params.OfficialSpeedLimit > 0
+			session.startTaskNamed("官方优选扫描", "official", map[string]interface{}{"ipType": params.IPType, "threads": params.Threads, "port": params.Port, "delay": params.Delay, "scanMode": scanMode, "autoSpeed": autoSpeed}, func(ctx context.Context, session *appSession) {
+				runOfficialTask(ctx, session, params.IPType, params.Threads, params.Port, params.Delay, scanMode)
+				if ctx.Err() != nil || !autoSpeed || !session.isBackgroundTask() {
+					return
+				}
+				dc := strings.TrimSpace(params.OfficialTargetDC)
+				if dc == "" {
+					session.scanMutex.Lock()
+					copy := append([]ScanResult(nil), session.scanResults...)
+					session.scanMutex.Unlock()
+					dc = pickBestDataCenter(copy)
+				}
+				if dc == "" || ctx.Err() != nil {
+					return
+				}
+				runDetailedTest(ctx, session, dc, params.OfficialSpeedPort, params.Delay, scanMode)
+				if ctx.Err() != nil || !session.isBackgroundTask() || params.OfficialSpeedLimit <= 0 {
+					return
+				}
+				speedURL := strings.TrimSpace(params.OfficialSpeedURL)
+				if speedURL == "" || isAutoSpeedURL(speedURL) {
+					speedURL = speedTestURL
+				}
+				session.testMutex.Lock()
+				results := append([]TestResult(nil), session.testResults...)
+				session.testMutex.Unlock()
+				if len(results) > 0 {
+					runOfficialSpeedBatch(ctx, session, params.OfficialSpeedPort, speedURL, params.OfficialSpeedLimit, params.OfficialSpeedMin, results, false)
+				}
 			})
 		},
 		"start_test": func(data json.RawMessage) {
@@ -152,8 +186,12 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if params.Delay < 0 {
 				params.Delay = 0
 			}
-			session.startTaskNamed("官方详细测试", "official", map[string]interface{}{"dc": params.DC, "port": params.Port, "delay": params.Delay}, func(ctx context.Context, session *appSession) {
-				runDetailedTest(ctx, session, params.DC, params.Port, params.Delay)
+			scanMode := params.ScanMode
+			if scanMode == "" {
+				scanMode = scanModeTCPing
+			}
+			session.startTaskNamed("官方详细测试", "official", map[string]interface{}{"dc": params.DC, "port": params.Port, "delay": params.Delay, "scanMode": scanMode}, func(ctx context.Context, session *appSession) {
+				runDetailedTest(ctx, session, params.DC, params.Port, params.Delay, scanMode)
 			})
 		},
 		"start_speed_test": func(data json.RawMessage) {
@@ -234,7 +272,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			session.startTaskNamed("非标优选", "nsb", map[string]interface{}{"fileName": params.FileName, "sourceURL": params.SourceURL, "outFile": params.OutFile, "maxThreads": params.MaxThreads, "fallbackPort": params.FallbackPort, "speedTest": params.SpeedTest, "speedURL": params.SpeedURL, "enableTLS": params.EnableTLS, "delay": params.Delay, "resultLimit": params.ResultLimit, "dc": params.DC, "speedMin": params.SpeedMin, "speedLimit": params.SpeedLimit, "compact": params.Compact}, func(ctx context.Context, session *appSession) {
+			scanMode := params.ScanMode
+			if scanMode == "" {
+				scanMode = scanModeTCPing
+			}
+			session.startTaskNamed("非标优选", "nsb", map[string]interface{}{"fileName": params.FileName, "sourceURL": params.SourceURL, "outFile": params.OutFile, "maxThreads": params.MaxThreads, "fallbackPort": params.FallbackPort, "speedTest": params.SpeedTest, "speedURL": params.SpeedURL, "enableTLS": params.EnableTLS, "delay": params.Delay, "resultLimit": params.ResultLimit, "dc": params.DC, "speedMin": params.SpeedMin, "speedLimit": params.SpeedLimit, "compact": params.Compact, "scanMode": scanMode}, func(ctx context.Context, session *appSession) {
 				fileName := params.FileName
 				fileContent := params.FileContent
 				if hasSourceURL {
@@ -250,7 +292,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					fileName = params.SourceURL
 					fileContent = content
 				}
-				runNSBTask(ctx, session, fileName, fileContent, params.OutFile, params.MaxThreads, params.FallbackPort, params.SpeedTest, params.SpeedURL, params.EnableTLS, params.Delay, params.ResultLimit, params.DC, params.SpeedMin, params.SpeedLimit, params.Compact)
+				runNSBTask(ctx, session, fileName, fileContent, params.OutFile, params.MaxThreads, params.FallbackPort, params.SpeedTest, params.SpeedURL, params.EnableTLS, params.Delay, params.ResultLimit, params.DC, params.SpeedMin, params.SpeedLimit, params.Compact, scanMode)
 			})
 		},
 		"start_nsb_speed_batch": func(data json.RawMessage) {
@@ -308,7 +350,25 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			session = backgroundSession
 			snapshot := backgroundSession.backgroundSummary()
 			backgroundSession.sendWSMessage("background_task_following", snapshot)
-			
+
+			if !snapshot.Running && snapshot.Mode == "official" {
+				backgroundSession.scanMutex.Lock()
+				scanResults := append([]ScanResult(nil), backgroundSession.scanResults...)
+				backgroundSession.scanMutex.Unlock()
+				if len(scanResults) > 0 {
+					backgroundSession.sendWSMessage("scan_complete_wait_dc", buildDCList(scanResults))
+				}
+				backgroundSession.testMutex.Lock()
+				results := append([]TestResult(nil), backgroundSession.testResults...)
+				backgroundSession.testMutex.Unlock()
+				if len(results) > 0 {
+					for _, res := range results {
+						backgroundSession.sendWSMessage("test_result", res)
+					}
+					backgroundSession.sendWSMessage("test_complete", results)
+				}
+			}
+
 			if !snapshot.Running && snapshot.Phase == "完成" {
 				backgroundSession.nsbMutex.Lock()
 				payload := backgroundSession.nsbCompletePayload
@@ -333,6 +393,20 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		},
 		"reset_all_config": func(data json.RawMessage) {
 			resetAllConfigFiles(session)
+		},
+		"get_config": func(data json.RawMessage) {
+			cfgPath := filepath.Join(filepath.Dir(os.Args[0]), "cfdata-config.json")
+			raw, err := os.ReadFile(cfgPath)
+			if err != nil {
+				session.sendWSMessage("error", "读取配置文件失败: "+err.Error())
+				return
+			}
+			var parsed interface{}
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				session.sendWSMessage("error", "解析配置文件失败: "+err.Error())
+				return
+			}
+			session.sendWSMessage("config_data", parsed)
 		},
 		"check_proxy_country": func(data json.RawMessage) {
 			if skipGeoCheck {
@@ -514,6 +588,31 @@ func setGitHubHeaders(req *http.Request, token string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "cfdata")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+}
+
+func buildDCList(scanResults []ScanResult) []DataCenterInfo {
+	dcMap := make(map[string]*DataCenterInfo)
+	for _, res := range scanResults {
+		if _, ok := dcMap[res.DataCenter]; !ok {
+			dcMap[res.DataCenter] = &DataCenterInfo{
+				DataCenter: res.DataCenter,
+				DCCountry:  res.DCCountry,
+				City:       res.City,
+				IPCount:    0,
+				MinLatency: 999999,
+			}
+		}
+		info := dcMap[res.DataCenter]
+		info.IPCount++
+		if lat := int(res.TCPDuration / time.Millisecond); lat < info.MinLatency {
+			info.MinLatency = lat
+		}
+	}
+	dcList := make([]DataCenterInfo, 0, len(dcMap))
+	for _, info := range dcMap {
+		dcList = append(dcList, *info)
+	}
+	return dcList
 }
 
 func escapeGitHubContentPath(path string) string {
