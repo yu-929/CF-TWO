@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import SwiftUI
 
 enum BackendMode: String, Codable {
     case local
