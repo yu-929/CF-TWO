@@ -63,13 +63,14 @@ jobs:
           go build \
             -trimpath \
             -ldflags "-s -w -X main.appVersion=${{ steps.set-version.outputs.VERSION }}" \
-            -o ../ios/CFData-WEB/cfdata .
+            -o ../ios/CFData-WEB/cfdata . 2>&1
           echo "Backend binary: $(file ../ios/CFData-WEB/cfdata)"
           echo "Size: $(du -h ../ios/CFData-WEB/cfdata | cut -f1)"
 
       - name: Generate Xcode project
         working-directory: ios
         run: |
+          rm -rf CFData-WEB.xcodeproj
           xcodegen generate
           ls -la CFData-WEB.xcodeproj/
 
@@ -77,24 +78,39 @@ jobs:
         id: build-archive
         working-directory: ios
         run: |
+          set -o pipefail
           rm -rf build
+
           xcodebuild archive \
             -project CFData-WEB.xcodeproj \
             -scheme CFData-WEB \
             -configuration Release \
-            -archivePath build/CFData-WEB.xcarchive \
+            -archivePath "$PWD/build/CFData-WEB.xcarchive" \
             -destination "generic/platform=iOS" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            -allowProvisioningUpdates 2>&1 | tee build.log
+            SWIFT_VERSION=5.0 2>&1 | tee build.log
 
-          echo "Archive exit code: $?"
-          ls -la build/ 2>/dev/null || echo "build/ not found"
-          find build -name "*.app" -type d 2>/dev/null || echo "No .app found"
+          echo "Exit code: $?"
+          echo "Archive contents:"
+          find build -type d -maxdepth 3 2>/dev/null || echo "build dir not found"
+
+      - name: Debug build failure
+        if: ${{ failure() || steps.build-archive.outcome == 'failure' }}
+        working-directory: ios
+        run: |
+          echo "=== Build log ==="
+          cat build.log 2>/dev/null || echo "No build.log"
+          echo "=== Build directory ==="
+          find build -type f 2>/dev/null || echo "No build dir"
+          echo "=== Xcode project ==="
+          ls -la CFData-WEB.xcodeproj/ 2>/dev/null || true
+          echo "=== xcodebuild version ==="
+          xcodebuild -version
 
       - name: Manually package IPA (unsigned)
-        if: ${{ github.event.inputs.signed != 'true' }}
+        if: ${{ github.event.inputs.signed != 'true' && steps.build-archive.outcome == 'success' }}
         working-directory: ios
         run: |
           mkdir -p build/ipa
@@ -103,8 +119,6 @@ jobs:
           echo "Found .app: $APP_PATH"
 
           if [ -z "$APP_PATH" ]; then
-            echo "No .app found in archive, trying Products"
-            ls -la build/CFData-WEB.xcarchive/Products/ 2>/dev/null || true
             APP_PATH=$(find build -name "*.app" -type d | head -1)
             echo "Fallback .app: $APP_PATH"
           fi
@@ -119,14 +133,13 @@ jobs:
             echo "IPA created: build/ipa/CFData-WEB.ipa"
             ls -la build/ipa/CFData-WEB.ipa
           else
-            echo "ERROR: No .app bundle found! Listing build directory:"
-            find build -type f -name "*.app" -o -name "*.ipa" 2>/dev/null || true
-            ls -laR build/ 2>/dev/null | head -50
+            echo "ERROR: No .app bundle found"
+            find build -type d -maxdepth 5 2>/dev/null
             exit 1
           fi
 
       - name: Export IPA (signed)
-        if: ${{ github.event.inputs.signed == 'true' }}
+        if: ${{ github.event.inputs.signed == 'true' && steps.build-archive.outcome == 'success' }}
         working-directory: ios
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -160,25 +173,20 @@ jobs:
             -exportOptionsPlist build/export-options.plist \
             -allowProvisioningUpdates
 
-          echo "Export result:"
           ls -la build/ipa/
 
       - name: Prepare artifacts
         run: |
           mkdir -p release_assets
 
-          # Find and copy IPA
-          find ios/build/ipa -name "*.ipa" -type f 2>/dev/null
           IPA_FILE=$(find ios/build/ipa -name "*.ipa" -type f 2>/dev/null | head -1)
           if [ -n "$IPA_FILE" ]; then
             cp "$IPA_FILE" "release_assets/CFData-WEB-ios-arm64.ipa"
             echo "IPA: $IPA_FILE"
           else
-            echo "WARNING: No IPA file found!"
-            find ios/build -type f 2>/dev/null | head -20
+            echo "WARNING: No IPA file found"
           fi
 
-          # Copy Go backend binary
           if [ -f ios/CFData-WEB/cfdata ]; then
             cp ios/CFData-WEB/cfdata release_assets/cfdata-ios-arm64
           fi
