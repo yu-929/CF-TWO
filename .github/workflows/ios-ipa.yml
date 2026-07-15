@@ -35,9 +35,6 @@ jobs:
           go-version: "1.25.4"
           cache-dependency-path: combined_refactor/go.sum
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
-
       - name: Set Version
         id: set-version
         run: |
@@ -71,8 +68,9 @@ jobs:
         working-directory: ios
         run: |
           rm -rf CFData-WEB.xcodeproj
-          xcodegen generate
+          ruby generate-project.rb
           ls -la CFData-WEB.xcodeproj/
+          ls -la CFData-WEB.xcodeproj/project.pbxproj
 
       - name: Build archive
         id: build-archive
