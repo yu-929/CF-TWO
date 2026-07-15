@@ -1,0 +1,40 @@
+name: CFData-WEB
+options:
+  bundleIdPrefix: com.cfdata
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: "${APPLE_TEAM_ID}"
+
+targets:
+  CFData-WEB:
+    type: application
+    platform: iOS
+    sources:
+      - path: CFData-WEB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cfdata.web
+        INFOPLIST_FILE: CFData-WEB/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "Apple Development"
+    configFiles:
+      Debug: CFData-WEB/Config/Debug.xcconfig
+      Release: CFData-WEB/Config/Release.xcconfig
+    preBuildScripts:
+      - name: "Copy Go Backend"
+        script: |
+          if [ -f "${SRCROOT}/CFData-WEB/cfdata" ]; then
+            cp "${SRCROOT}/CFData-WEB/cfdata" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata"
+            chmod +x "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata"
+          fi
+        basedOnDependencyAnalysis: false
+    info:
+      path: CFData-WEB/Info.plist
+    entitlements:
+      path: CFData-WEB/CFData-WEB.entitlements

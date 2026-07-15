@@ -1,0 +1,231 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version"
+        required: false
+        default: "v1.0"
+        type: string
+      signed:
+        description: "Code sign the IPA (requires Apple ID secrets)"
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "ios-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  ios-ipa:
+    name: Build iOS IPA
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.4"
+          cache-dependency-path: combined_refactor/go.sum
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+
+      - name: Set Version
+        id: set-version
+        run: |
+          version="${{ github.event.inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${{ github.ref_name }}"
+          fi
+          echo "VERSION=$version" >> $GITHUB_OUTPUT
+
+      - name: Download CA Certificates
+        run: |
+          curl -fsSL --retry 3 --connect-timeout 10 \
+            https://curl.se/ca/cacert.pem \
+            -o combined_refactor/ca-certificates.crt
+
+      - name: Build Go backend for iOS arm64
+        id: build-backend
+        working-directory: combined_refactor
+        env:
+          GOOS: ios
+          GOARCH: arm64
+          CGO_ENABLED: "1"
+        run: |
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.appVersion=${{ steps.set-version.outputs.VERSION }}" \
+            -o ../ios/CFData-WEB/cfdata .
+          echo "Backend binary: $(file ../ios/CFData-WEB/cfdata)"
+          echo "Size: $(du -h ../ios/CFData-WEB/cfdata | cut -f1)"
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: |
+          xcodegen generate
+          echo "Xcode project generated:"
+          ls -la CFData-WEB.xcodeproj/
+
+      - name: Build archive (unsigned)
+        if: ${{ !github.event.inputs.signed && github.event.inputs.signed != 'true' }}
+        working-directory: ios
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild archive \
+            -project CFData-WEB.xcodeproj \
+            -scheme CFData-WEB \
+            -configuration Release \
+            -archivePath build/CFData-WEB.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build archive (signed)
+        if: ${{ github.event.inputs.signed == 'true' }}
+        working-directory: ios
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild archive \
+            -project CFData-WEB.xcodeproj \
+            -scheme CFData-WEB \
+            -configuration Release \
+            -archivePath build/CFData-WEB.xcarchive \
+            -destination "generic/platform=iOS" \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            -allowProvisioningUpdates \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      - name: Export IPA (unsigned - development only)
+        if: ${{ !github.event.inputs.signed && github.event.inputs.signed != 'true' }}
+        working-directory: ios
+        run: |
+          mkdir -p build/ipa
+          cat > build/export-options.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>-</string>
+            <key>teamID</key>
+            <string></string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>compileBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath build/CFData-WEB.xcarchive \
+            -exportPath build/ipa \
+            -exportOptionsPlist build/export-options.plist \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO || true
+
+          # If export failed (likely due to signing), just package the .app
+          if [ ! -f build/ipa/*.ipa ]; then
+            echo "IPA export failed, packaging .app directly..."
+            mkdir -p build/ipa
+            APP_PATH=$(find build/CFData-WEB.xcarchive -name "*.app" -type d | head -1)
+            if [ -n "$APP_PATH" ]; then
+              mkdir -p build/ipa/Payload
+              cp -r "$APP_PATH" build/ipa/Payload/
+              cd build/ipa
+              zip -r CFData-WEB-unsigned.ipa Payload/
+              rm -rf Payload
+              cd ../..
+              echo "Unsigned IPA created: build/ipa/CFData-WEB-unsigned.ipa"
+            fi
+          fi
+
+      - name: Export IPA (signed - ad-hoc)
+        if: ${{ github.event.inputs.signed == 'true' }}
+        working-directory: ios
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > build/export-options.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>ad-hoc</string>
+            <key>teamID</key>
+            <string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>compileBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath build/CFData-WEB.xcarchive \
+            -exportPath build/ipa \
+            -exportOptionsPlist build/export-options.plist \
+            -allowProvisioningUpdates
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p release_assets
+
+          # Copy IPA if exists
+          IPA_FILE=$(find ios/build/ipa -name "*.ipa" -type f 2>/dev/null | head -1)
+          if [ -n "$IPA_FILE" ]; then
+            cp "$IPA_FILE" "release_assets/CFData-WEB-ios-arm64.ipa"
+            echo "IPA: $IPA_FILE"
+          fi
+
+          # Check for unsigned IPA
+          UNSIGNED_FILE=$(find ios/build/ipa -name "*-unsigned.ipa" -type f 2>/dev/null | head -1)
+          if [ -n "$UNSIGNED_FILE" ]; then
+            cp "$UNSIGNED_FILE" "release_assets/CFData-WEB-ios-arm64-unsigned.ipa"
+            echo "Unsigned IPA: $UNSIGNED_FILE"
+          fi
+
+          # Copy the Go backend binary as well
+          if [ -f ios/CFData-WEB/cfdata ]; then
+            cp ios/CFData-WEB/cfdata release_assets/cfdata-ios-arm64
+          fi
+
+          ls -la release_assets/
+
+      - name: Generate SHA256
+        working-directory: release_assets
+        run: |
+          for file in $(find . -type f ! -name '*.sha256'); do
+            sha256sum "$file" | awk '{print $1}' > "${file}.sha256"
+          done
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: release_assets/*
+          retention-days: 30
