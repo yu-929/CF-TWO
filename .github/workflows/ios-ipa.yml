@@ -100,12 +100,14 @@ jobs:
         if: ${{ failure() || steps.build-archive.outcome == 'failure' }}
         working-directory: ios
         run: |
-          echo "=== Build log ==="
-          cat build.log 2>/dev/null || echo "No build.log"
+          echo "=== Build errors ==="
+          grep -i "error:" build.log 2>/dev/null || echo "No error lines found"
+          grep -i "fatal:" build.log 2>/dev/null || echo "No fatal lines found"
+          grep -i "warning:" build.log 2>/dev/null | head -20 || echo "No warnings"
+          echo "=== Last 50 lines ==="
+          tail -50 build.log 2>/dev/null || echo "No build.log"
           echo "=== Build directory ==="
           find build -type f 2>/dev/null || echo "No build dir"
-          echo "=== Xcode project ==="
-          ls -la CFData-WEB.xcodeproj/ 2>/dev/null || true
           echo "=== xcodebuild version ==="
           xcodebuild -version
 
@@ -199,6 +201,14 @@ jobs:
           for file in $(find . -type f ! -name '*.sha256'); do
             sha256sum "$file" | awk '{print $1}' > "${file}.sha256"
           done
+
+      - name: Upload build log
+        if: ${{ failure() || steps.build-archive.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: ios/build.log
+          retention-days: 7
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
