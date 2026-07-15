@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -45,7 +46,7 @@ struct SettingsView: View {
                 Text("本地模式（内置后端）").tag(BackendMode.local)
                 Text("远程模式（外部服务器）").tag(BackendMode.remote)
             }
-            .onChange(of: connectionMode) { newMode in
+            .onChange(of: connectionMode) { _, newMode in
                 backendManager.switchMode(to: newMode)
             }
 
@@ -136,5 +137,3 @@ struct SettingsView: View {
         WKWebsiteDataStore.default().removeData(ofTypes: dataTypes, modifiedSince: date) {}
     }
 }
-
-import WebKit

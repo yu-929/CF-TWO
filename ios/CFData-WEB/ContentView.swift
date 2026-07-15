@@ -79,7 +79,7 @@ struct ContentView: View {
             } message: {
                 Text(backendManager.errorMessage ?? "未知错误")
             }
-            .onChange(of: backendManager.errorMessage) { newValue in
+            .onChange(of: backendManager.errorMessage) { _, newValue in
                 if newValue != nil && !backendManager.isRunning {
                     showErrorAlert = true
                 }
