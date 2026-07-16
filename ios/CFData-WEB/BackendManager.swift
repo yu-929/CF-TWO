@@ -20,10 +20,10 @@ class BackendManager: ObservableObject {
     @AppStorage("remoteServerURL") var remoteServerURL: String = ""
     @AppStorage("connectionMode") private var storedMode: String = BackendMode.local.rawValue
 
-    private var localProcess: Process?
     private let port: Int = 13335
-    private let maxRetries = 15
-    private let retryInterval: useconds_t = 500_000
+#if os(macOS)
+    private var localProcess: Process?
+#endif
 
     private init() {
         mode = BackendMode(rawValue: storedMode) ?? .local
@@ -77,6 +77,7 @@ class BackendManager: ObservableObject {
     }
 
     private func startLocalBackend() {
+#if os(macOS)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
 
@@ -111,7 +112,7 @@ class BackendManager: ObservableObject {
                     process.terminate()
                     Task { @MainActor in
                         self.isLoading = false
-                        self.errorMessage = "本地后端启动超时（15秒），请检查 cfdata 二进制文件是否兼容 iOS"
+                        self.errorMessage = "本地后端启动超时（15秒），请检查 cfdata 二进制文件是否兼容"
                     }
                 }
             } catch {
@@ -121,9 +122,17 @@ class BackendManager: ObservableObject {
                 }
             }
         }
+#else
+        Task { @MainActor in
+            self.isLoading = false
+            self.errorMessage = "iOS 不支持本地模式，请切换到远程模式连接外部服务器"
+        }
+#endif
     }
 
     private func waitForBackend() -> Bool {
+#if os(macOS)
+        let retryInterval: useconds_t = 500_000
         let deadline = DispatchTime.now() + .seconds(15)
         while DispatchTime.now() < deadline {
             if checkBackendReady() {
@@ -132,6 +141,9 @@ class BackendManager: ObservableObject {
             usleep(retryInterval)
         }
         return false
+#else
+        return false
+#endif
     }
 
     private func checkBackendReady() -> Bool {
@@ -195,8 +207,10 @@ class BackendManager: ObservableObject {
     }
 
     func stopLocalBackend() {
+#if os(macOS)
         localProcess?.terminate()
         localProcess = nil
+#endif
         isRunning = false
     }
 
