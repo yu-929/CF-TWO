@@ -50,7 +50,7 @@ jobs:
             https://curl.se/ca/cacert.pem \
             -o combined_refactor/ca-certificates.crt
 
-      - name: Build Go backend for iOS arm64
+      - name: Build Go backend for iOS arm64 (c-archive)
         working-directory: combined_refactor
         env:
           GOOS: ios
@@ -59,10 +59,12 @@ jobs:
         run: |
           go build \
             -trimpath \
+            -buildmode=c-archive \
             -ldflags "-s -w -X main.appVersion=${{ steps.set-version.outputs.VERSION }}" \
-            -o ../ios/CFData-WEB/cfdata . 2>&1
-          echo "Backend binary: $(file ../ios/CFData-WEB/cfdata)"
-          echo "Size: $(du -h ../ios/CFData-WEB/cfdata | cut -f1)"
+            -o ../ios/libcfdata.a . 2>&1
+          echo "Static library: $(file ../ios/libcfdata.a)"
+          echo "Size: $(du -h ../ios/libcfdata.a | cut -f1)"
+          ls -la ../ios/libcfdata.h 2>/dev/null && echo "Header generated" || echo "No header"
 
       - name: Generate Xcode project
         working-directory: ios

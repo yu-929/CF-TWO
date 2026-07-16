@@ -24,10 +24,14 @@ RELEASE_GLOBAL = gen_uuid
 SOURCES_PHASE = gen_uuid
 RESOURCES_PHASE = gen_uuid
 FRAMEWORKS_PHASE = gen_uuid
-SCRIPT_PHASE = gen_uuid
+LIB_A_REF = gen_uuid
+BRIDGE_HEADER_REF = gen_uuid
 
 swift_files = Dir.glob(File.join(SRC_DIR, '**', '*.swift')).map { |f| f.sub("#{PROJECT_DIR}/", '') }.sort
 xcassets = Dir.glob(File.join(SRC_DIR, '**', '*.xcassets')).map { |f| f.sub("#{PROJECT_DIR}/", '') }.sort
+
+extra_files = ["libcfdata.a", "CFData-WEB-Bridging-Header.h"]
+extra_refs = { "libcfdata.a" => LIB_A_REF, "CFData-WEB-Bridging-Header.h" => BRIDGE_HEADER_REF }
 
 file_refs = {}
 swift_files.each { |f| file_refs[f] = gen_uuid }
@@ -36,7 +40,7 @@ xcassets.each { |f| file_refs[f] = gen_uuid }
 build_files = {}
 swift_files.each { |f| build_files[f] = gen_uuid }
 
-children = swift_files.map { |f| file_refs[f] } + xcassets.map { |f| file_refs[f] } + [PRODUCT_REF]
+children = swift_files.map { |f| file_refs[f] } + xcassets.map { |f| file_refs[f] } + extra_files.map { |f| extra_refs[f] } + [PRODUCT_REF]
 
 indent = "\t"
 i1 = indent
@@ -68,9 +72,13 @@ xcassets_pbx = xcassets.map { |path|
 
 product_ref_pbx = "#{i2}#{PRODUCT_REF} /* CFData-WEB.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CFData-WEB.app; sourceTree = BUILT_PRODUCTS_DIR; };"
 
+lib_a_pbx = "#{i2}#{LIB_A_REF} /* libcfdata.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libcfdata.a; sourceTree = \"<group>\"; };"
+bridge_header_pbx = "#{i2}#{BRIDGE_HEADER_REF} /* CFData-WEB-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CFData-WEB-Bridging-Header.h; sourceTree = \"<group>\"; };"
+
 frameworks_pbx = "#{i3}isa = PBXFrameworksBuildPhase;\n" +
   "#{i3}buildActionMask = 2147483647;\n" +
   "#{i3}files = (\n" +
+  "#{i4}#{LIB_A_REF} /* libcfdata.a in Frameworks */,\n" +
   "#{i3});\n" +
   "#{i3}runOnlyForDeploymentPostprocessing = 0;"
 
@@ -136,6 +144,7 @@ debug_build_settings = <<~DEBUG.chomp
 #{i3}PRODUCT_NAME = "CFData-WEB";
 #{i3}SDKROOT = iphoneos;
 #{i3}SWIFT_EMIT_LOC_STRINGS = YES;
+#{i3}SWIFT_OBJC_BRIDGING_HEADER = "CFData-WEB-Bridging-Header.h";
 #{i3}SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 #{i3}SWIFT_VERSION = 5.0;
 #{i3}TARGETED_DEVICE_FAMILY = "1,2";
@@ -196,11 +205,10 @@ release_build_settings = <<~RELEASE.chomp
 #{i3}PRODUCT_NAME = "CFData-WEB";
 #{i3}SDKROOT = iphoneos;
 #{i3}SWIFT_EMIT_LOC_STRINGS = YES;
+#{i3}SWIFT_OBJC_BRIDGING_HEADER = "CFData-WEB-Bridging-Header.h";
 #{i3}SWIFT_VERSION = 5.0;
 #{i3}TARGETED_DEVICE_FAMILY = "1,2";
 RELEASE
-
-script_content = 'if [ -f \"${SRCROOT}/CFData-WEB/cfdata\" ]; then\n  cp \"${SRCROOT}/CFData-WEB/cfdata\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata\"\n  chmod +x \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata\"\nfi\n'
 
 sections = []
 
@@ -221,6 +229,8 @@ sections << ""
 sections << "/* Begin PBXFileReference section */"
 sections << file_refs_pbx
 sections << xcassets_pbx
+sections << lib_a_pbx
+sections << bridge_header_pbx
 sections << product_ref_pbx
 sections << "/* End PBXFileReference section */"
 
@@ -251,7 +261,6 @@ sections << "#{i3}buildPhases = ("
 sections << "#{i4}#{SOURCES_PHASE},"
 sections << "#{i4}#{FRAMEWORKS_PHASE},"
 sections << "#{i4}#{RESOURCES_PHASE},"
-sections << "#{i4}#{SCRIPT_PHASE},"
 sections << "#{i3});"
 sections << "#{i3}buildRules = ("
 sections << "#{i3});"
@@ -302,25 +311,6 @@ sections << "#{i3});"
 sections << "#{i3}runOnlyForDeploymentPostprocessing = 0;"
 sections << "#{i2}};"
 sections << "/* End PBXResourcesBuildPhase section */"
-
-sections << ""
-sections << "/* Begin PBXShellScriptBuildPhase section */"
-sections << "#{i2}#{SCRIPT_PHASE} = {"
-sections << "#{i3}isa = PBXShellScriptBuildPhase;"
-sections << "#{i3}buildActionMask = 2147483647;"
-sections << "#{i3}files = ("
-sections << "#{i3});"
-sections << "#{i3}inputPaths = ("
-sections << "#{i3});"
-sections << "#{i3}name = \"Copy Go Backend\";"
-sections << "#{i3}outputPaths = ("
-sections << "#{i3});"
-sections << "#{i3}runOnlyForDeploymentPostprocessing = 0;"
-sections << "#{i3}shellPath = /bin/sh;"
-sections << "#{i3}shellScript = \"#{script_content}\";"
-sections << "#{i3}showEnvVarsInLog = 0;"
-sections << "#{i2}};"
-sections << "/* End PBXShellScriptBuildPhase section */"
 
 sections << ""
 sections << "/* Begin PBXSourcesBuildPhase section */"

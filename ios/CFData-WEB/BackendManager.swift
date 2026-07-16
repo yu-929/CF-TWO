@@ -1,5 +1,4 @@
 import Foundation
-import Network
 import SwiftUI
 
 enum BackendMode: String, Codable {
@@ -18,7 +17,7 @@ class BackendManager: ObservableObject {
     @Published var mode: BackendMode = .local
 
     @AppStorage("remoteServerURL") var remoteServerURL: String = ""
-    @AppStorage("connectionMode") private var storedMode: String = BackendMode.remote.rawValue
+    @AppStorage("connectionMode") private var storedMode: String = BackendMode.local.rawValue
 
     private let port: Int = 13335
 #if os(macOS)
@@ -26,12 +25,7 @@ class BackendManager: ObservableObject {
 #endif
 
     private init() {
-#if !os(macOS)
-        mode = .remote
-        storedMode = BackendMode.remote.rawValue
-#else
         mode = BackendMode(rawValue: storedMode) ?? .local
-#endif
         updateBackendURL()
     }
 
@@ -48,9 +42,6 @@ class BackendManager: ObservableObject {
     }
 
     func switchMode(to newMode: BackendMode) {
-#if !os(macOS)
-        guard newMode == .remote else { return }
-#endif
         stopLocalBackend()
         mode = newMode
         storedMode = newMode.rawValue
@@ -131,9 +122,21 @@ class BackendManager: ObservableObject {
             }
         }
 #else
-        Task { @MainActor in
-            self.isLoading = false
-            self.errorMessage = "iOS 不支持本地模式，请切换到远程模式连接外部服务器"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            StartIOSServer()
+            if self.waitForBackend() {
+                Task { @MainActor in
+                    self.isRunning = true
+                    self.isLoading = false
+                    self.errorMessage = nil
+                }
+            } else {
+                Task { @MainActor in
+                    self.isLoading = false
+                    self.errorMessage = "本地后端启动失败"
+                }
+            }
         }
 #endif
     }
@@ -218,6 +221,8 @@ class BackendManager: ObservableObject {
 #if os(macOS)
         localProcess?.terminate()
         localProcess = nil
+#else
+        StopIOSServer()
 #endif
         isRunning = false
     }

@@ -1,12 +1,12 @@
+//go:build !ios
+
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,79 +15,7 @@ import (
 	"time"
 )
 
-var webUser, webPassword string
-var webSessionMinutes int
 var boolFlagNames = []string{"cli", "nsbtls", "progress", "nocolor", "compactipv4", "nsbcompact", "github", "nsbqualified", "skipgeo"}
-
-type latestReleaseInfo struct {
-	TagName string `json:"tag_name"`
-	HTMLURL string `json:"html_url"`
-}
-
-func getLatestRelease(ctx context.Context) (latestReleaseInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/PoemMisty/CFData-WEB/releases/latest", nil)
-	if err != nil {
-		return latestReleaseInfo{}, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "CFData-WEB/"+appVersion)
-	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
-	defer cancel()
-	resp, err := upstreamHTTPClient.Do(req.WithContext(ctx))
-	if err != nil {
-		return latestReleaseInfo{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return latestReleaseInfo{}, fmt.Errorf("GitHub 返回状态 %d", resp.StatusCode)
-	}
-	var info latestReleaseInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return latestReleaseInfo{}, err
-	}
-	if info.HTMLURL == "" {
-		info.HTMLURL = releaseLatestURL
-	}
-	return info, nil
-}
-
-func versionIsOlder(current, latest string) bool {
-	current = strings.TrimPrefix(strings.TrimSpace(current), "v")
-	latest = strings.TrimPrefix(strings.TrimSpace(latest), "v")
-	if current == "" || latest == "" || current == "dev" {
-		return false
-	}
-	cParts := strings.FieldsFunc(current, func(r rune) bool { return r == '.' || r == '-' || r == '_' })
-	lParts := strings.FieldsFunc(latest, func(r rune) bool { return r == '.' || r == '-' || r == '_' })
-	for i := 0; i < len(cParts) || i < len(lParts); i++ {
-		c, l := 0, 0
-		if i < len(cParts) {
-			c, _ = strconv.Atoi(cParts[i])
-		}
-		if i < len(lParts) {
-			l, _ = strconv.Atoi(lParts[i])
-		}
-		if c != l {
-			return c < l
-		}
-	}
-	return false
-}
-
-func checkAndPrintUpdate(prefix string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
-	defer cancel()
-	info, err := getLatestRelease(ctx)
-	if err != nil {
-		recordDebugError("update_check", err.Error())
-		fmt.Printf("%s更新检测失败: %v\n", prefix, err)
-		return
-	}
-	if versionIsOlder(appVersion, info.TagName) {
-		fmt.Printf("%s发现新版本 %s，下载: %s\n", prefix, info.TagName, releaseLatestURL)
-	}
-}
 
 func rewriteBoolFlagArgs() {
 	if len(os.Args) <= 2 {
@@ -119,10 +47,16 @@ func matchBoolFlag(arg string, boolSet map[string]struct{}) (string, bool) {
 	}
 	name := strings.TrimLeft(arg, "-")
 	if strings.Contains(name, "=") {
-		return "", false
+		parts := strings.SplitN(name, "=", 2)
+		if _, ok := boolSet[parts[0]]; ok {
+			return parts[0], true
+		}
 	}
-	if _, ok := boolSet[name]; ok {
-		return name, true
+	name = strings.ToLower(name)
+	for _, b := range boolFlagNames {
+		if strings.ToLower(b) == name {
+			return b, true
+		}
 	}
 	return "", false
 }
