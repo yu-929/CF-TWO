@@ -25,6 +25,7 @@ SOURCES_PHASE = gen_uuid
 RESOURCES_PHASE = gen_uuid
 FRAMEWORKS_PHASE = gen_uuid
 LIB_A_REF = gen_uuid
+LIB_A_BUILD_FILE = gen_uuid
 BRIDGE_HEADER_REF = gen_uuid
 
 swift_files = Dir.glob(File.join(SRC_DIR, '**', '*.swift')).map { |f| f.sub("#{PROJECT_DIR}/", '') }.sort
@@ -53,6 +54,8 @@ src_files_pbx = swift_files.map { |f|
   "#{i4}#{build_files[f]} /* #{File.basename(f)} in Sources */ = {isa = PBXBuildFile; fileRef = #{file_refs[f]}; };"
 }.join("\n")
 
+lib_a_build_file_pbx = "#{i4}#{LIB_A_BUILD_FILE} /* libcfdata.a in Frameworks */ = {isa = PBXBuildFile; fileRef = #{LIB_A_REF}; };"
+
 file_refs_pbx = file_refs.map { |path, uuid|
   next nil if path.end_with?('.xcassets')
   ext = File.extname(path)
@@ -78,7 +81,7 @@ bridge_header_pbx = "#{i2}#{BRIDGE_HEADER_REF} /* CFData-WEB-Bridging-Header.h *
 frameworks_pbx = "#{i3}isa = PBXFrameworksBuildPhase;\n" +
   "#{i3}buildActionMask = 2147483647;\n" +
   "#{i3}files = (\n" +
-  "#{i4}#{LIB_A_REF} /* libcfdata.a in Frameworks */,\n" +
+  "#{i4}#{LIB_A_BUILD_FILE} /* libcfdata.a in Frameworks */,\n" +
   "#{i3});\n" +
   "#{i3}runOnlyForDeploymentPostprocessing = 0;"
 
@@ -138,8 +141,10 @@ debug_build_settings = <<~DEBUG.chomp
 #{i4}"$(inherited)",
 #{i4}"@executable_path/Frameworks",
 #{i3});
+#{i3}LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)";
 #{i3}MARKETING_VERSION = 1.0;
 #{i3}ONLY_ACTIVE_ARCH = YES;
+#{i3}OTHER_LDFLAGS = "-ObjC";
 #{i3}PRODUCT_BUNDLE_IDENTIFIER = com.cfdata.web;
 #{i3}PRODUCT_NAME = "CFData-WEB";
 #{i3}SDKROOT = iphoneos;
@@ -200,7 +205,9 @@ release_build_settings = <<~RELEASE.chomp
 #{i4}"$(inherited)",
 #{i4}"@executable_path/Frameworks",
 #{i3});
+#{i3}LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)";
 #{i3}MARKETING_VERSION = 1.0;
+#{i3}OTHER_LDFLAGS = "-ObjC";
 #{i3}PRODUCT_BUNDLE_IDENTIFIER = com.cfdata.web;
 #{i3}PRODUCT_NAME = "CFData-WEB";
 #{i3}SDKROOT = iphoneos;
@@ -223,6 +230,7 @@ sections << "#{i1}objects = {"
 sections << ""
 sections << "/* Begin PBXBuildFile section */"
 sections << src_files_pbx
+sections << lib_a_build_file_pbx
 sections << "/* End PBXBuildFile section */"
 
 sections << ""
