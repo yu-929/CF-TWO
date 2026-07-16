@@ -1,255 +1,357 @@
 #!/usr/bin/env ruby
 # Generate Xcode project for CFData-WEB
-# Usage: ruby generate-project.rb
 
 require 'fileutils'
+require 'securerandom'
 
 PROJECT_DIR = File.expand_path('.', __dir__)
 SRC_DIR = File.join(PROJECT_DIR, 'CFData-WEB')
 XCODE_PROJECT = File.join(PROJECT_DIR, 'CFData-WEB.xcodeproj')
 PBXPROJ = File.join(XCODE_PROJECT, 'project.pbxproj')
 
-UUID = -> { (0...24).map { rand(36).to_s(36) }.join.upcase }
-
-# File references
-swift_files = Dir.glob(File.join(SRC_DIR, '**', '*.swift'))
-plist_files = Dir.glob(File.join(SRC_DIR, '**', '*.plist'))
-entitlement_files = Dir.glob(File.join(SRC_DIR, '**', '*.entitlements'))
-asset_catalogs = Dir.glob(File.join(SRC_DIR, '**', '*.xcassets'))
-
-files = swift_files + plist_files + entitlement_files + asset_catalogs
-
-# Filter out DerivedData
-files.reject! { |f| f.include?('DerivedData') }
-
-# Create UUIDs for everything
-root_uuid = UUID.call
-main_group_uuid = UUID.call
-product_ref_uuid = UUID.call
-target_uuid = UUID.call
-build_config_list_uuid = UUID.call
-debug_config_uuid = UUID.call
-release_config_uuid = UUID.call
-sources_build_phase_uuid = UUID.call
-resources_build_phase_uuid = UUID.call
-frameworks_build_phase_uuid = UUID.call
-shell_script_phase_uuid = UUID.call
-native_target_uuid = UUID.call
-
-file_uuids = {}
-files.each { |f| file_uuids[f] = UUID.call }
-
-# Build file references (PBXBuildFile)
-build_file_uuids = {}
-files.each { |f| build_file_uuids[f] = UUID.call }
-
-plist_path = File.join(SRC_DIR, 'Info.plist')
-
-project = {
-  archiveVersion: 1,
-  classes: {},
-  objectVersion: 56,
-  objects: {
-    root_uuid => {
-      isa: 'PBXProject',
-      attributes: {
-        BuildIndependentTargetsInParallel: 1,
-        LastSwiftUpdateCheck: 1500,
-        LastUpgradeCheck: 1500,
-        TargetAttributes: {
-          target_uuid => {
-            CreatedOnToolsVersion: '15.0'
-          }
-        }
-      },
-      buildConfigurationList: build_config_list_uuid,
-      compatibilityVersion: 'Xcode 14.0',
-      developmentRegion: 'en',
-      hasScannedForEncodings: 0,
-      knownRegions: ['en', 'Base', 'zh-Hans'],
-      mainGroup: main_group_uuid,
-      productRefGroup: main_group_uuid,
-      projectDirPath: '',
-      projectRoot: '',
-      targets: [target_uuid]
-    },
-    main_group_uuid => {
-      isa: 'PBXGroup',
-      children: [
-        *files.map { |f| file_uuids[f] },
-        product_ref_uuid
-      ],
-      sourceTree: '<group>'
-    },
-    # File references
-    *files.map { |f|
-      ext = File.extname(f)
-      last = File.basename(f)
-      path = f.sub("#{PROJECT_DIR}/", '')
-      [file_uuids[f], {
-        isa: 'PBXFileReference',
-        lastKnownFileType: case ext
-          when '.swift' then 'sourcecode.swift'
-          when '.plist' then 'text.plist.xml'
-          when '.entitlements' then 'text.plist.entitlements'
-          when '.png' then 'image.png'
-          when '.json' then 'text.json'
-          when '.xcassets' then 'folder.assetcatalog'
-          else 'file'
-          end,
-        path: path,
-        sourceTree: '<group>'
-      }]
-    }.to_h,
-    product_ref_uuid => {
-      isa: 'PBXFileReference',
-      explicitFileType: 'wrapper.application',
-      includeInIndex: 0,
-      path: 'CFData-WEB.app',
-      sourceTree: 'BUILT_PRODUCTS_DIR'
-    },
-    # Build files
-    *files.select { |f| f.end_with?('.swift') }.map { |f|
-      [build_file_uuids[f], {
-        isa: 'PBXBuildFile',
-        fileRef: file_uuids[f]
-      }]
-    }.to_h,
-    # Build phases
-    sources_build_phase_uuid => {
-      isa: 'PBXSourcesBuildPhase',
-      buildActionMask: 2**31 - 1,
-      files: files.select { |f| f.end_with?('.swift') }.map { |f| build_file_uuids[f] },
-      runOnlyForDeploymentPostprocessing: 0
-    },
-    resources_build_phase_uuid => {
-      isa: 'PBXResourcesBuildPhase',
-      buildActionMask: 2**31 - 1,
-      files: [],
-      runOnlyForDeploymentPostprocessing: 0
-    },
-    frameworks_build_phase_uuid => {
-      isa: 'PBXFrameworksBuildPhase',
-      buildActionMask: 2**31 - 1,
-      files: [],
-      runOnlyForDeploymentPostprocessing: 0
-    },
-    shell_script_phase_uuid => {
-      isa: 'PBXShellScriptBuildPhase',
-      buildActionMask: 2**31 - 1,
-      files: [],
-      inputPaths: [],
-      name: 'Copy Go Backend',
-      outputPaths: [],
-      runOnlyForDeploymentPostprocessing: 0,
-      shellPath: '/bin/sh',
-      shellScript: 'if [ -f "${SRCROOT}/CFData-WEB/cfdata" ]; then
-  cp "${SRCROOT}/CFData-WEB/cfdata" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata"
-  chmod +x "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata"
-fi',
-      showEnvVarsInLog: 0
-    },
-    # Target
-    target_uuid => {
-      isa: 'PBXNativeTarget',
-      buildConfigurationList: native_target_uuid,
-      buildPhases: [
-        sources_build_phase_uuid,
-        frameworks_build_phase_uuid,
-        resources_build_phase_uuid,
-        shell_script_phase_uuid
-      ],
-      buildRules: [],
-      dependencies: [],
-      name: 'CFData-WEB',
-      productName: 'CFData-WEB',
-      productReference: product_ref_uuid,
-      productType: 'com.apple.product-type.application'
-    },
-    native_target_uuid => {
-      isa: 'XCConfigurationList',
-      buildConfigurations: [debug_config_uuid, release_config_uuid],
-      defaultConfigurationIsVisible: 0,
-      defaultConfigurationName: 'Release'
-    },
-    build_config_list_uuid => {
-      isa: 'XCConfigurationList',
-      buildConfigurations: [debug_config_uuid, release_config_uuid],
-      defaultConfigurationIsVisible: 0,
-      defaultConfigurationName: 'Release'
-    },
-    debug_config_uuid => {
-      isa: 'XCBuildConfiguration',
-      buildSettings: {
-        ASSETCATALOG_COMPILER_APPICON_NAME: 'AppIcon',
-        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: 'AccentColor',
-        CODE_SIGN_STYLE: 'Automatic',
-        CURRENT_PROJECT_VERSION: '1',
-        DEVELOPMENT_TEAM: '',
-        INFOPLIST_FILE: plist_path.sub("#{PROJECT_DIR}/", ''),
-        IPHONEOS_DEPLOYMENT_TARGET: '17.0',
-        LD_RUNPATH_SEARCH_PATHS: ['$(inherited)', '@executable_path/Frameworks'],
-        MARKETING_VERSION: '1.0',
-        PRODUCT_BUNDLE_IDENTIFIER: 'com.cfdata.web',
-        PRODUCT_NAME: 'CFData-WEB',
-        SWIFT_EMIT_LOC_STRINGS: 'YES',
-        SWIFT_VERSION: '5.0',
-        TARGETED_DEVICE_FAMILY: '1,2'
-      },
-      name: 'Debug'
-    },
-    release_config_uuid => {
-      isa: 'XCBuildConfiguration',
-      buildSettings: {
-        ASSETCATALOG_COMPILER_APPICON_NAME: 'AppIcon',
-        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: 'AccentColor',
-        CODE_SIGN_STYLE: 'Automatic',
-        CURRENT_PROJECT_VERSION: '1',
-        DEVELOPMENT_TEAM: '',
-        INFOPLIST_FILE: plist_path.sub("#{PROJECT_DIR}/", ''),
-        IPHONEOS_DEPLOYMENT_TARGET: '17.0',
-        LD_RUNPATH_SEARCH_PATHS: ['$(inherited)', '@executable_path/Frameworks'],
-        MARKETING_VERSION: '1.0',
-        PRODUCT_BUNDLE_IDENTIFIER: 'com.cfdata.web',
-        PRODUCT_NAME: 'CFData-WEB',
-        SWIFT_EMIT_LOC_STRINGS: 'YES',
-        SWIFT_VERSION: '5.0',
-        TARGETED_DEVICE_FAMILY: '1,2'
-      },
-      name: 'Release'
-    }
-  }
-}
-
-# Write project.pbxproj
-FileUtils.mkdir_p(XCODE_PROJECT)
-
-output = "// !$*UTF8*$!\n"
-def serialize(obj, indent = 0)
-  case obj
-  when Hash
-    "{\n" + obj.map { |k, v|
-      "#{' ' * (indent + 4)}#{k} = #{serialize(v, indent + 4)};"
-    }.join("\n") + "\n#{' ' * indent}}"
-  when Array
-    "(\n" + obj.map { |v|
-      "#{' ' * (indent + 4)}#{serialize(v, indent + 4)},"
-    }.join("\n") + "\n#{' ' * indent})"
-  when String
-    obj.inspect
-  when Integer, Symbol
-    obj.to_s
-  when true, false
-    obj ? 'YES' : 'NO'
-  when nil
-    ''
-  else
-    obj.to_s
-  end
+def gen_uuid
+  SecureRandom.hex(12).upcase
 end
 
-output += serialize(project)
+ROOT = gen_uuid
+MAIN_GROUP = gen_uuid
+PRODUCT_REF = gen_uuid
+TARGET = gen_uuid
+BCL_GLOBAL = gen_uuid
+BCL_TARGET = gen_uuid
+DEBUG_GLOBAL = gen_uuid
+RELEASE_GLOBAL = gen_uuid
+SOURCES_PHASE = gen_uuid
+RESOURCES_PHASE = gen_uuid
+FRAMEWORKS_PHASE = gen_uuid
+SCRIPT_PHASE = gen_uuid
 
-File.write(PBXPROJ, output)
+swift_files = Dir.glob(File.join(SRC_DIR, '**', '*.swift')).map { |f| f.sub("#{PROJECT_DIR}/", '') }.sort
+xcassets = Dir.glob(File.join(SRC_DIR, '**', '*.xcassets')).map { |f| f.sub("#{PROJECT_DIR}/", '') }.sort
+plist_file = "CFData-WEB/Info.plist"
+entitlements_file = "CFData-WEB/CFData-WEB.entitlements"
+cfdata_bin = "CFData-WEB/cfdata"
+
+file_refs = {}
+swift_files.each { |f| file_refs[f] = gen_uuid }
+xcassets.each { |f| file_refs[f] = gen_uuid }
+
+build_files = {}
+swift_files.each { |f| build_files[f] = gen_uuid }
+
+children = swift_files.map { |f| file_refs[f] } + xcassets.map { |f| file_refs[f] } + [PRODUCT_REF]
+
+template = <<~PBX
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+#{swift_files.map { |f| "\t\t#{build_files[f]} /* #{File.basename(f)} in Sources */ = {isa = PBXBuildFile; fileRef = #{file_refs[f]}; }; } .join("\n")}
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+#{file_refs.map { |path, uuid|
+  next if path.end_with?('.xcassets')
+  ext = File.extname(path)
+  file_type = case ext
+    when '.swift' then 'sourcecode.swift'
+    when '.plist' then 'text.plist.xml; charset=utf-8'
+    when '.entitlements' then 'text.plist.entitlements'
+    when '.png' then 'image.png'
+    else 'file'
+  end
+  "\t\t#{uuid} /* #{File.basename(path)} */ = {isa = PBXFileReference; lastKnownFileType = #{file_type}; path = #{path}; sourceTree = \"<group>\"; };"
+}.compact.join("\n")}
+#{xcassets.map { |path|
+  "\t\t#{file_refs[path]} /* #{File.basename(path)} */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = #{path}; sourceTree = \"<group>\"; };"
+}.join("\n")}
+\t\t#{PRODUCT_REF} /* CFData-WEB.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CFData-WEB.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+\t\t#{FRAMEWORKS_PHASE} = {
+\t\t\tisa = PBXFrameworksBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+\t\t#{MAIN_GROUP} = {
+\t\t\tisa = PBXGroup;
+\t\t\tchildren = (
+#{children.map { |u| "\t\t\t\t#{u} /* #{u} */," }.join("\n")}
+\t\t\t);
+\t\t\tsourceTree = "<group>";
+\t\t};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+\t\t#{TARGET} = {
+\t\t\tisa = PBXNativeTarget;
+\t\t\tbuildConfigurationList = #{BCL_TARGET};
+\t\t\tbuildPhases = (
+\t\t\t\t#{SOURCES_PHASE},
+\t\t\t\t#{FRAMEWORKS_PHASE},
+\t\t\t\t#{RESOURCES_PHASE},
+\t\t\t\t#{SCRIPT_PHASE},
+\t\t\t);
+\t\t\tbuildRules = (
+\t\t\t);
+\t\t\tdependencies = (
+\t\t\t);
+\t\t\tname = "CFData-WEB";
+\t\t\tproductName = "CFData-WEB";
+\t\t\tproductReference = #{PRODUCT_REF};
+\t\t\tproductType = "com.apple.product-type.application";
+\t\t};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+\t\t#{ROOT} = {
+\t\t\tisa = PBXProject;
+\t\t\tattributes = {
+\t\t\t\tBuildIndependentTargetsInParallel = 1;
+\t\t\t\tLastSwiftUpdateCheck = 1600;
+\t\t\t\tLastUpgradeCheck = 1600;
+\t\t\t};
+\t\t\tbuildConfigurationList = #{BCL_GLOBAL};
+\t\t\tcompatibilityVersion = "Xcode 14.0";
+\t\t\tdevelopmentRegion = "en";
+\t\t\thasScannedForEncodings = 0;
+\t\t\tknownRegions = (
+\t\t\t\ten,
+\t\t\t\tBase,
+\t\t\t\t"zh-Hans",
+\t\t\t);
+\t\t\tmainGroup = #{MAIN_GROUP};
+\t\t\tproductRefGroup = #{MAIN_GROUP};
+\t\t\tprojectDirPath = "";
+\t\t\tprojectRoot = "";
+\t\t\ttargets = (
+\t\t\t\t#{TARGET},
+\t\t\t);
+\t\t};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+\t\t#{RESOURCES_PHASE} = {
+\t\t\tisa = PBXResourcesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+\t\t#{SCRIPT_PHASE} = {
+\t\t\tisa = PBXShellScriptBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+\t\t\t);
+\t\t\tinputPaths = (
+\t\t\t);
+\t\t\tname = "Copy Go Backend";
+\t\t\toutputPaths = (
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t\tshellPath = /bin/sh;
+\t\t\tshellScript = "if [ -f \"${SRCROOT}/CFData-WEB/cfdata\" ]; then\\n  cp \"${SRCROOT}/CFData-WEB/cfdata\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata\"\\n  chmod +x \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata\"\\nfi\\n";
+\t\t\tshowEnvVarsInLog = 0;
+\t\t};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+\t\t#{SOURCES_PHASE} = {
+\t\t\tisa = PBXSourcesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+#{swift_files.map { |f| "\t\t\t\t#{build_files[f]} /* #{File.basename(f)} in Sources */," }.join("\n")}
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+\t\t#{DEBUG_GLOBAL} = {
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {
+\t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;
+\t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+\t\t\t\tASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+\t\t\t\tCLANG_ANALYZER_NONNULL = YES;
+\t\t\t\tCLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+\t\t\t\tCLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+\t\t\t\tCLANG_ENABLE_MODULES = YES;
+\t\t\t\tCLANG_ENABLE_OBJC_ARC = YES;
+\t\t\t\tCLANG_ENABLE_OBJC_WEAK = YES;
+\t\t\t\tCLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+\t\t\t\tCLANG_WARN_BOOL_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_COMMA = YES;
+\t\t\t\tCLANG_WARN_CONSTANT_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+\t\t\t\tCLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+\t\t\t\tCLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+\t\t\t\tCLANG_WARN_EMPTY_BODY = YES;
+\t\t\t\tCLANG_WARN_ENUM_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_INFINITE_RECURSION = YES;
+\t\t\t\tCLANG_WARN_INT_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+\t\t\t\tCLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+\t\t\t\tCLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+\t\t\t\tCLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+\t\t\t\tCLANG_WARN_STRICT_PROTOTYPES = YES;
+\t\t\t\tCLANG_WARN_SUSPICIOUS_MOVE = YES;
+\t\t\t\tCLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+\t\t\t\tCLANG_WARN_UNREACHABLE_CODE = YES;
+\t\t\t\tCLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+\t\t\t\tCODE_SIGN_IDENTITY = "Apple Development";
+\t\t\t\tCODE_SIGN_STYLE = Automatic;
+\t\t\t\tCOPY_PHASE_STRIP = NO;
+\t\t\t\tCURRENT_PROJECT_VERSION = 1;
+\t\t\t\tDEBUG_INFORMATION_FORMAT = dwarf;
+\t\t\t\tENABLE_STRICT_OBJC_MSGSEND = YES;
+\t\t\t\tENABLE_TESTABILITY = YES;
+\t\t\t\tENABLE_USER_SCRIPT_SANDBOXING = YES;
+\t\t\t\tGCC_C_LANGUAGE_STANDARD = gnu17;
+\t\t\t\tGCC_DYNAMIC_NO_PIC = NO;
+\t\t\t\tGCC_NO_COMMON_BLOCKS = YES;
+\t\t\t\tGCC_OPTIMIZATION_LEVEL = 0;
+\t\t\t\tGCC_PREPROCESSOR_DEFINITIONS = (
+\t\t\t\t\t"DEBUG=1",
+\t\t\t\t\t"$(inherited)",
+\t\t\t\t);
+\t\t\t\tGCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+\t\t\t\tGCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+\t\t\t\tGCC_WARN_UNDECLARED_SELECTOR = YES;
+\t\t\t\tGCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+\t\t\t\tGCC_WARN_UNUSED_FUNCTION = YES;
+\t\t\t\tGCC_WARN_UNUSED_VARIABLE = YES;
+\t\t\t\tINFOPLIST_FILE = CFData-WEB/Info.plist;
+\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 17.0;
+\t\t\t\tLD_RUNPATH_SEARCH_PATHS = (
+\t\t\t\t\t"$(inherited)",
+\t\t\t\t\t"@executable_path/Frameworks",
+\t\t\t\t);
+\t\t\t\tMARKETING_VERSION = 1.0;
+\t\t\t\tMTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+\t\t\t\tMTL_FAST_MATH = YES;
+\t\t\t\tONLY_ACTIVE_ARCH = YES;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.cfdata.web;
+\t\t\t\tPRODUCT_NAME = "CFData-WEB";
+\t\t\t\tSWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+\t\t\t\tSWIFT_EMIT_LOC_STRINGS = YES;
+\t\t\t\tSWIFT_OPTIMIZATION_LEVEL = "-Onone";
+\t\t\t\tSWIFT_VERSION = 5.0;
+\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+\t\t#{RELEASE_GLOBAL} = {
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {
+\t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;
+\t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+\t\t\t\tASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+\t\t\t\tCLANG_ANALYZER_NONNULL = YES;
+\t\t\t\tCLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+\t\t\t\tCLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+\t\t\t\tCLANG_ENABLE_MODULES = YES;
+\t\t\t\tCLANG_ENABLE_OBJC_ARC = YES;
+\t\t\t\tCLANG_ENABLE_OBJC_WEAK = YES;
+\t\t\t\tCLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+\t\t\t\tCLANG_WARN_BOOL_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_COMMA = YES;
+\t\t\t\tCLANG_WARN_CONSTANT_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+\t\t\t\tCLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+\t\t\t\tCLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+\t\t\t\tCLANG_WARN_EMPTY_BODY = YES;
+\t\t\t\tCLANG_WARN_ENUM_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_INFINITE_RECURSION = YES;
+\t\t\t\tCLANG_WARN_INT_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+\t\t\t\tCLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+\t\t\t\tCLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+\t\t\t\tCLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+\t\t\t\tCLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+\t\t\t\tCLANG_WARN_STRICT_PROTOTYPES = YES;
+\t\t\t\tCLANG_WARN_SUSPICIOUS_MOVE = YES;
+\t\t\t\tCLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+\t\t\t\tCLANG_WARN_UNREACHABLE_CODE = YES;
+\t\t\t\tCLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+\t\t\t\tCODE_SIGN_IDENTITY = "Apple Development";
+\t\t\t\tCODE_SIGN_STYLE = Automatic;
+\t\t\t\tCOPY_PHASE_STRIP = NO;
+\t\t\t\tCURRENT_PROJECT_VERSION = 1;
+\t\t\t\tDEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+\t\t\t\tENABLE_NS_ASSERTIONS = NO;
+\t\t\t\tENABLE_STRICT_OBJC_MSGSEND = YES;
+\t\t\t\tENABLE_USER_SCRIPT_SANDBOXING = YES;
+\t\t\t\tGCC_C_LANGUAGE_STANDARD = gnu17;
+\t\t\t\tGCC_NO_COMMON_BLOCKS = YES;
+\t\t\t\tGCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+\t\t\t\tGCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+\t\t\t\tGCC_WARN_UNDECLARED_SELECTOR = YES;
+\t\t\t\tGCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+\t\t\t\tGCC_WARN_UNUSED_FUNCTION = YES;
+\t\t\t\tGCC_WARN_UNUSED_VARIABLE = YES;
+\t\t\t\tINFOPLIST_FILE = CFData-WEB/Info.plist;
+\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 17.0;
+\t\t\t\tLD_RUNPATH_SEARCH_PATHS = (
+\t\t\t\t\t"$(inherited)",
+\t\t\t\t\t"@executable_path/Frameworks",
+\t\t\t\t);
+\t\t\t\tMARKETING_VERSION = 1.0;
+\t\t\t\tMTL_FAST_MATH = YES;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.cfdata.web;
+\t\t\t\tPRODUCT_NAME = "CFData-WEB";
+\t\t\t\tSWIFT_EMIT_LOC_STRINGS = YES;
+\t\t\t\tSWIFT_VERSION = 5.0;
+\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";
+\t\t\t};
+\t\t\tname = Release;
+\t\t};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+\t\t#{BCL_GLOBAL} = {
+\t\t\tisa = XCConfigurationList;
+\t\t\tbuildConfigurations = (
+\t\t\t\t#{DEBUG_GLOBAL},
+\t\t\t\t#{RELEASE_GLOBAL},
+\t\t\t);
+\t\t\tdefaultConfigurationIsVisible = 0;
+\t\t\tdefaultConfigurationName = Release;
+\t\t};
+\t\t#{BCL_TARGET} = {
+\t\t\tisa = XCConfigurationList;
+\t\t\tbuildConfigurations = (
+\t\t\t\t#{DEBUG_GLOBAL},
+\t\t\t\t#{RELEASE_GLOBAL},
+\t\t\t);
+\t\t\tdefaultConfigurationIsVisible = 0;
+\t\t\tdefaultConfigurationName = Release;
+\t\t};
+/* End XCConfigurationList section */
+	};
+	rootObject = #{ROOT};
+}
+PBX
+
+FileUtils.mkdir_p(XCODE_PROJECT)
+File.write(PBXPROJ, template)
 puts "Generated: #{PBXPROJ}"
-puts "Files: #{files.length}"
+puts "Swift files: #{swift_files.length}"
+puts "Asset catalogs: #{xcassets.length}"
