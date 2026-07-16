@@ -18,7 +18,7 @@ class BackendManager: ObservableObject {
     @Published var mode: BackendMode = .local
 
     @AppStorage("remoteServerURL") var remoteServerURL: String = ""
-    @AppStorage("connectionMode") private var storedMode: String = BackendMode.local.rawValue
+    @AppStorage("connectionMode") private var storedMode: String = BackendMode.remote.rawValue
 
     private let port: Int = 13335
 #if os(macOS)
@@ -26,7 +26,12 @@ class BackendManager: ObservableObject {
 #endif
 
     private init() {
+#if !os(macOS)
+        mode = .remote
+        storedMode = BackendMode.remote.rawValue
+#else
         mode = BackendMode(rawValue: storedMode) ?? .local
+#endif
         updateBackendURL()
     }
 
@@ -43,6 +48,9 @@ class BackendManager: ObservableObject {
     }
 
     func switchMode(to newMode: BackendMode) {
+#if !os(macOS)
+        guard newMode == .remote else { return }
+#endif
         stopLocalBackend()
         mode = newMode
         storedMode = newMode.rawValue

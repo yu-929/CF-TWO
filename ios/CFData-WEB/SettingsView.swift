@@ -43,8 +43,10 @@ struct SettingsView: View {
     private var connectionSection: some View {
         Section("连接设置") {
             Picker("连接模式", selection: $connectionMode) {
-                Text("本地模式（内置后端）").tag(BackendMode.local)
                 Text("远程模式（外部服务器）").tag(BackendMode.remote)
+#if os(macOS)
+                Text("本地模式（内置后端）").tag(BackendMode.local)
+#endif
             }
             .onChange(of: connectionMode) { _, newMode in
                 backendManager.switchMode(to: newMode)
