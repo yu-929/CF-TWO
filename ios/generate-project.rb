@@ -28,9 +28,6 @@ SCRIPT_PHASE = gen_uuid
 
 swift_files = Dir.glob(File.join(SRC_DIR, '**', '*.swift')).map { |f| f.sub("#{PROJECT_DIR}/", '') }.sort
 xcassets = Dir.glob(File.join(SRC_DIR, '**', '*.xcassets')).map { |f| f.sub("#{PROJECT_DIR}/", '') }.sort
-plist_file = "CFData-WEB/Info.plist"
-entitlements_file = "CFData-WEB/CFData-WEB.entitlements"
-cfdata_bin = "CFData-WEB/cfdata"
 
 file_refs = {}
 swift_files.each { |f| file_refs[f] = gen_uuid }
@@ -41,22 +38,19 @@ swift_files.each { |f| build_files[f] = gen_uuid }
 
 children = swift_files.map { |f| file_refs[f] } + xcassets.map { |f| file_refs[f] } + [PRODUCT_REF]
 
-template = <<~PBX
-// !$*UTF8*$!
-{
-	archiveVersion = 1;
-	classes = {
-	};
-	objectVersion = 56;
-	objects = {
+indent = "\t"
+i1 = indent
+i2 = indent * 2
+i3 = indent * 3
+i4 = indent * 4
+i5 = indent * 5
 
-/* Begin PBXBuildFile section */
-#{swift_files.map { |f| "\t\t#{build_files[f]} /* #{File.basename(f)} in Sources */ = {isa = PBXBuildFile; fileRef = #{file_refs[f]}; }; } .join("\n")}
-/* End PBXBuildFile section */
+src_files_pbx = swift_files.map { |f|
+  "#{i4}#{build_files[f]} /* #{File.basename(f)} in Sources */ = {isa = PBXBuildFile; fileRef = #{file_refs[f]}; };"
+}.join("\n")
 
-/* Begin PBXFileReference section */
-#{file_refs.map { |path, uuid|
-  next if path.end_with?('.xcassets')
+file_refs_pbx = file_refs.map { |path, uuid|
+  next nil if path.end_with?('.xcassets')
   ext = File.extname(path)
   file_type = case ext
     when '.swift' then 'sourcecode.swift'
@@ -65,293 +59,327 @@ template = <<~PBX
     when '.png' then 'image.png'
     else 'file'
   end
-  "\t\t#{uuid} /* #{File.basename(path)} */ = {isa = PBXFileReference; lastKnownFileType = #{file_type}; path = #{path}; sourceTree = \"<group>\"; };"
-}.compact.join("\n")}
-#{xcassets.map { |path|
-  "\t\t#{file_refs[path]} /* #{File.basename(path)} */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = #{path}; sourceTree = \"<group>\"; };"
-}.join("\n")}
-\t\t#{PRODUCT_REF} /* CFData-WEB.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CFData-WEB.app; sourceTree = BUILT_PRODUCTS_DIR; };
-/* End PBXFileReference section */
+  "#{i2}#{uuid} /* #{File.basename(path)} */ = {isa = PBXFileReference; lastKnownFileType = #{file_type}; path = #{path}; sourceTree = \"<group>\"; };"
+}.compact.join("\n")
 
-/* Begin PBXFrameworksBuildPhase section */
-\t\t#{FRAMEWORKS_PHASE} = {
-\t\t\tisa = PBXFrameworksBuildPhase;
-\t\t\tbuildActionMask = 2147483647;
-\t\t\tfiles = (
-\t\t\t);
-\t\t\trunOnlyForDeploymentPostprocessing = 0;
-\t\t};
-/* End PBXFrameworksBuildPhase section */
+xcassets_pbx = xcassets.map { |path|
+  "#{i2}#{file_refs[path]} /* #{File.basename(path)} */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = #{path}; sourceTree = \"<group>\"; };"
+}.join("\n")
 
-/* Begin PBXGroup section */
-\t\t#{MAIN_GROUP} = {
-\t\t\tisa = PBXGroup;
-\t\t\tchildren = (
-#{children.map { |u| "\t\t\t\t#{u} /* #{u} */," }.join("\n")}
-\t\t\t);
-\t\t\tsourceTree = "<group>";
-\t\t};
-/* End PBXGroup section */
+product_ref_pbx = "#{i2}#{PRODUCT_REF} /* CFData-WEB.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CFData-WEB.app; sourceTree = BUILT_PRODUCTS_DIR; };"
 
-/* Begin PBXNativeTarget section */
-\t\t#{TARGET} = {
-\t\t\tisa = PBXNativeTarget;
-\t\t\tbuildConfigurationList = #{BCL_TARGET};
-\t\t\tbuildPhases = (
-\t\t\t\t#{SOURCES_PHASE},
-\t\t\t\t#{FRAMEWORKS_PHASE},
-\t\t\t\t#{RESOURCES_PHASE},
-\t\t\t\t#{SCRIPT_PHASE},
-\t\t\t);
-\t\t\tbuildRules = (
-\t\t\t);
-\t\t\tdependencies = (
-\t\t\t);
-\t\t\tname = "CFData-WEB";
-\t\t\tproductName = "CFData-WEB";
-\t\t\tproductReference = #{PRODUCT_REF};
-\t\t\tproductType = "com.apple.product-type.application";
-\t\t};
-/* End PBXNativeTarget section */
+frameworks_pbx = "#{i3}isa = PBXFrameworksBuildPhase;\n" +
+  "#{i3}buildActionMask = 2147483647;\n" +
+  "#{i3}files = (\n" +
+  "#{i3});\n" +
+  "#{i3}runOnlyForDeploymentPostprocessing = 0;"
 
-/* Begin PBXProject section */
-\t\t#{ROOT} = {
-\t\t\tisa = PBXProject;
-\t\t\tattributes = {
-\t\t\t\tBuildIndependentTargetsInParallel = 1;
-\t\t\t\tLastSwiftUpdateCheck = 1600;
-\t\t\t\tLastUpgradeCheck = 1600;
-\t\t\t};
-\t\t\tbuildConfigurationList = #{BCL_GLOBAL};
-\t\t\tcompatibilityVersion = "Xcode 14.0";
-\t\t\tdevelopmentRegion = "en";
-\t\t\thasScannedForEncodings = 0;
-\t\t\tknownRegions = (
-\t\t\t\ten,
-\t\t\t\tBase,
-\t\t\t\t"zh-Hans",
-\t\t\t);
-\t\t\tmainGroup = #{MAIN_GROUP};
-\t\t\tproductRefGroup = #{MAIN_GROUP};
-\t\t\tprojectDirPath = "";
-\t\t\tprojectRoot = "";
-\t\t\ttargets = (
-\t\t\t\t#{TARGET},
-\t\t\t);
-\t\t};
-/* End PBXProject section */
+children_pbx = children.map { |u| "#{i4}#{u} /* #{u} */," }.join("\n")
 
-/* Begin PBXResourcesBuildPhase section */
-\t\t#{RESOURCES_PHASE} = {
-\t\t\tisa = PBXResourcesBuildPhase;
-\t\t\tbuildActionMask = 2147483647;
-\t\t\tfiles = (
-\t\t\t);
-\t\t\trunOnlyForDeploymentPostprocessing = 0;
-\t\t};
-/* End PBXResourcesBuildPhase section */
+sources_files_pbx = swift_files.map { |f|
+  "#{i5}#{build_files[f]} /* #{File.basename(f)} in Sources */,"
+}.join("\n")
 
-/* Begin PBXShellScriptBuildPhase section */
-\t\t#{SCRIPT_PHASE} = {
-\t\t\tisa = PBXShellScriptBuildPhase;
-\t\t\tbuildActionMask = 2147483647;
-\t\t\tfiles = (
-\t\t\t);
-\t\t\tinputPaths = (
-\t\t\t);
-\t\t\tname = "Copy Go Backend";
-\t\t\toutputPaths = (
-\t\t\t);
-\t\t\trunOnlyForDeploymentPostprocessing = 0;
-\t\t\tshellPath = /bin/sh;
-\t\t\tshellScript = "if [ -f \"${SRCROOT}/CFData-WEB/cfdata\" ]; then\\n  cp \"${SRCROOT}/CFData-WEB/cfdata\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata\"\\n  chmod +x \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata\"\\nfi\\n";
-\t\t\tshowEnvVarsInLog = 0;
-\t\t};
-/* End PBXShellScriptBuildPhase section */
+debug_build_settings = <<~DEBUG.chomp
+#{i3}ALWAYS_SEARCH_USER_PATHS = NO;
+#{i3}ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+#{i3}ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+#{i3}CLANG_ANALYZER_NONNULL = YES;
+#{i3}CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+#{i3}CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+#{i3}CLANG_ENABLE_MODULES = YES;
+#{i3}CLANG_ENABLE_OBJC_ARC = YES;
+#{i3}CLANG_ENABLE_OBJC_WEAK = YES;
+#{i3}CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+#{i3}CLANG_WARN_BOOL_CONVERSION = YES;
+#{i3}CLANG_WARN_COMMA = YES;
+#{i3}CLANG_WARN_CONSTANT_CONVERSION = YES;
+#{i3}CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+#{i3}CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+#{i3}CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+#{i3}CLANG_WARN_EMPTY_BODY = YES;
+#{i3}CLANG_WARN_ENUM_CONVERSION = YES;
+#{i3}CLANG_WARN_INFINITE_RECURSION = YES;
+#{i3}CLANG_WARN_INT_CONVERSION = YES;
+#{i3}CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+#{i3}CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+#{i3}CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+#{i3}CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+#{i3}CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+#{i3}CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+#{i3}CLANG_WARN_STRICT_PROTOTYPES = YES;
+#{i3}CLANG_WARN_SUSPICIOUS_MOVE = YES;
+#{i3}CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+#{i3}CLANG_WARN_UNREACHABLE_CODE = YES;
+#{i3}CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+#{i3}CODE_SIGN_IDENTITY = "Apple Development";
+#{i3}CODE_SIGN_STYLE = Automatic;
+#{i3}CURRENT_PROJECT_VERSION = 1;
+#{i3}ENABLE_STRICT_OBJC_MSGSEND = YES;
+#{i3}GCC_C_LANGUAGE_STANDARD = gnu17;
+#{i3}GCC_NO_COMMON_BLOCKS = YES;
+#{i3}GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+#{i3}GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+#{i3}GCC_WARN_UNDECLARED_SELECTOR = YES;
+#{i3}GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+#{i3}GCC_WARN_UNUSED_FUNCTION = YES;
+#{i3}GCC_WARN_UNUSED_VARIABLE = YES;
+#{i3}INFOPLIST_FILE = CFData-WEB/Info.plist;
+#{i3}IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+#{i3}LD_RUNPATH_SEARCH_PATHS = (
+#{i4}"$(inherited)",
+#{i4}"@executable_path/Frameworks",
+#{i3});
+#{i3}MARKETING_VERSION = 1.0;
+#{i3}ONLY_ACTIVE_ARCH = YES;
+#{i3}PRODUCT_BUNDLE_IDENTIFIER = com.cfdata.web;
+#{i3}PRODUCT_NAME = "CFData-WEB";
+#{i3}SWIFT_EMIT_LOC_STRINGS = YES;
+#{i3}SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+#{i3}SWIFT_VERSION = 5.0;
+#{i3}TARGETED_DEVICE_FAMILY = "1,2";
+DEBUG
 
-/* Begin PBXSourcesBuildPhase section */
-\t\t#{SOURCES_PHASE} = {
-\t\t\tisa = PBXSourcesBuildPhase;
-\t\t\tbuildActionMask = 2147483647;
-\t\t\tfiles = (
-#{swift_files.map { |f| "\t\t\t\t#{build_files[f]} /* #{File.basename(f)} in Sources */," }.join("\n")}
-\t\t\t);
-\t\t\trunOnlyForDeploymentPostprocessing = 0;
-\t\t};
-/* End PBXSourcesBuildPhase section */
+release_build_settings = <<~RELEASE.chomp
+#{i3}ALWAYS_SEARCH_USER_PATHS = NO;
+#{i3}ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+#{i3}ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+#{i3}CLANG_ANALYZER_NONNULL = YES;
+#{i3}CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+#{i3}CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+#{i3}CLANG_ENABLE_MODULES = YES;
+#{i3}CLANG_ENABLE_OBJC_ARC = YES;
+#{i3}CLANG_ENABLE_OBJC_WEAK = YES;
+#{i3}CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+#{i3}CLANG_WARN_BOOL_CONVERSION = YES;
+#{i3}CLANG_WARN_COMMA = YES;
+#{i3}CLANG_WARN_CONSTANT_CONVERSION = YES;
+#{i3}CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+#{i3}CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+#{i3}CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+#{i3}CLANG_WARN_EMPTY_BODY = YES;
+#{i3}CLANG_WARN_ENUM_CONVERSION = YES;
+#{i3}CLANG_WARN_INFINITE_RECURSION = YES;
+#{i3}CLANG_WARN_INT_CONVERSION = YES;
+#{i3}CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+#{i3}CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+#{i3}CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+#{i3}CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+#{i3}CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+#{i3}CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+#{i3}CLANG_WARN_STRICT_PROTOTYPES = YES;
+#{i3}CLANG_WARN_SUSPICIOUS_MOVE = YES;
+#{i3}CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+#{i3}CLANG_WARN_UNREACHABLE_CODE = YES;
+#{i3}CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+#{i3}CODE_SIGN_IDENTITY = "Apple Development";
+#{i3}CODE_SIGN_STYLE = Automatic;
+#{i3}CURRENT_PROJECT_VERSION = 1;
+#{i3}ENABLE_STRICT_OBJC_MSGSEND = YES;
+#{i3}GCC_C_LANGUAGE_STANDARD = gnu17;
+#{i3}GCC_NO_COMMON_BLOCKS = YES;
+#{i3}GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+#{i3}GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+#{i3}GCC_WARN_UNDECLARED_SELECTOR = YES;
+#{i3}GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+#{i3}GCC_WARN_UNUSED_FUNCTION = YES;
+#{i3}GCC_WARN_UNUSED_VARIABLE = YES;
+#{i3}INFOPLIST_FILE = CFData-WEB/Info.plist;
+#{i3}IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+#{i3}LD_RUNPATH_SEARCH_PATHS = (
+#{i4}"$(inherited)",
+#{i4}"@executable_path/Frameworks",
+#{i3});
+#{i3}MARKETING_VERSION = 1.0;
+#{i3}PRODUCT_BUNDLE_IDENTIFIER = com.cfdata.web;
+#{i3}PRODUCT_NAME = "CFData-WEB";
+#{i3}SWIFT_EMIT_LOC_STRINGS = YES;
+#{i3}SWIFT_VERSION = 5.0;
+#{i3}TARGETED_DEVICE_FAMILY = "1,2";
+RELEASE
 
-/* Begin XCBuildConfiguration section */
-\t\t#{DEBUG_GLOBAL} = {
-\t\t\tisa = XCBuildConfiguration;
-\t\t\tbuildSettings = {
-\t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;
-\t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-\t\t\t\tASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-\t\t\t\tCLANG_ANALYZER_NONNULL = YES;
-\t\t\t\tCLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-\t\t\t\tCLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-\t\t\t\tCLANG_ENABLE_MODULES = YES;
-\t\t\t\tCLANG_ENABLE_OBJC_ARC = YES;
-\t\t\t\tCLANG_ENABLE_OBJC_WEAK = YES;
-\t\t\t\tCLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-\t\t\t\tCLANG_WARN_BOOL_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_COMMA = YES;
-\t\t\t\tCLANG_WARN_CONSTANT_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-\t\t\t\tCLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-\t\t\t\tCLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-\t\t\t\tCLANG_WARN_EMPTY_BODY = YES;
-\t\t\t\tCLANG_WARN_ENUM_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_INFINITE_RECURSION = YES;
-\t\t\t\tCLANG_WARN_INT_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-\t\t\t\tCLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-\t\t\t\tCLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-\t\t\t\tCLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-\t\t\t\tCLANG_WARN_STRICT_PROTOTYPES = YES;
-\t\t\t\tCLANG_WARN_SUSPICIOUS_MOVE = YES;
-\t\t\t\tCLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-\t\t\t\tCLANG_WARN_UNREACHABLE_CODE = YES;
-\t\t\t\tCLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-\t\t\t\tCODE_SIGN_IDENTITY = "Apple Development";
-\t\t\t\tCODE_SIGN_STYLE = Automatic;
-\t\t\t\tCOPY_PHASE_STRIP = NO;
-\t\t\t\tCURRENT_PROJECT_VERSION = 1;
-\t\t\t\tDEBUG_INFORMATION_FORMAT = dwarf;
-\t\t\t\tENABLE_STRICT_OBJC_MSGSEND = YES;
-\t\t\t\tENABLE_TESTABILITY = YES;
-\t\t\t\tENABLE_USER_SCRIPT_SANDBOXING = YES;
-\t\t\t\tGCC_C_LANGUAGE_STANDARD = gnu17;
-\t\t\t\tGCC_DYNAMIC_NO_PIC = NO;
-\t\t\t\tGCC_NO_COMMON_BLOCKS = YES;
-\t\t\t\tGCC_OPTIMIZATION_LEVEL = 0;
-\t\t\t\tGCC_PREPROCESSOR_DEFINITIONS = (
-\t\t\t\t\t"DEBUG=1",
-\t\t\t\t\t"$(inherited)",
-\t\t\t\t);
-\t\t\t\tGCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-\t\t\t\tGCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-\t\t\t\tGCC_WARN_UNDECLARED_SELECTOR = YES;
-\t\t\t\tGCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-\t\t\t\tGCC_WARN_UNUSED_FUNCTION = YES;
-\t\t\t\tGCC_WARN_UNUSED_VARIABLE = YES;
-\t\t\t\tINFOPLIST_FILE = CFData-WEB/Info.plist;
-\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 17.0;
-\t\t\t\tLD_RUNPATH_SEARCH_PATHS = (
-\t\t\t\t\t"$(inherited)",
-\t\t\t\t\t"@executable_path/Frameworks",
-\t\t\t\t);
-\t\t\t\tMARKETING_VERSION = 1.0;
-\t\t\t\tMTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-\t\t\t\tMTL_FAST_MATH = YES;
-\t\t\t\tONLY_ACTIVE_ARCH = YES;
-\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.cfdata.web;
-\t\t\t\tPRODUCT_NAME = "CFData-WEB";
-\t\t\t\tSWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
-\t\t\t\tSWIFT_EMIT_LOC_STRINGS = YES;
-\t\t\t\tSWIFT_OPTIMIZATION_LEVEL = "-Onone";
-\t\t\t\tSWIFT_VERSION = 5.0;
-\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-\t\t#{RELEASE_GLOBAL} = {
-\t\t\tisa = XCBuildConfiguration;
-\t\t\tbuildSettings = {
-\t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;
-\t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-\t\t\t\tASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-\t\t\t\tCLANG_ANALYZER_NONNULL = YES;
-\t\t\t\tCLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-\t\t\t\tCLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-\t\t\t\tCLANG_ENABLE_MODULES = YES;
-\t\t\t\tCLANG_ENABLE_OBJC_ARC = YES;
-\t\t\t\tCLANG_ENABLE_OBJC_WEAK = YES;
-\t\t\t\tCLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-\t\t\t\tCLANG_WARN_BOOL_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_COMMA = YES;
-\t\t\t\tCLANG_WARN_CONSTANT_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-\t\t\t\tCLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-\t\t\t\tCLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-\t\t\t\tCLANG_WARN_EMPTY_BODY = YES;
-\t\t\t\tCLANG_WARN_ENUM_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_INFINITE_RECURSION = YES;
-\t\t\t\tCLANG_WARN_INT_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-\t\t\t\tCLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-\t\t\t\tCLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-\t\t\t\tCLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-\t\t\t\tCLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-\t\t\t\tCLANG_WARN_STRICT_PROTOTYPES = YES;
-\t\t\t\tCLANG_WARN_SUSPICIOUS_MOVE = YES;
-\t\t\t\tCLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-\t\t\t\tCLANG_WARN_UNREACHABLE_CODE = YES;
-\t\t\t\tCLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-\t\t\t\tCODE_SIGN_IDENTITY = "Apple Development";
-\t\t\t\tCODE_SIGN_STYLE = Automatic;
-\t\t\t\tCOPY_PHASE_STRIP = NO;
-\t\t\t\tCURRENT_PROJECT_VERSION = 1;
-\t\t\t\tDEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-\t\t\t\tENABLE_NS_ASSERTIONS = NO;
-\t\t\t\tENABLE_STRICT_OBJC_MSGSEND = YES;
-\t\t\t\tENABLE_USER_SCRIPT_SANDBOXING = YES;
-\t\t\t\tGCC_C_LANGUAGE_STANDARD = gnu17;
-\t\t\t\tGCC_NO_COMMON_BLOCKS = YES;
-\t\t\t\tGCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-\t\t\t\tGCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-\t\t\t\tGCC_WARN_UNDECLARED_SELECTOR = YES;
-\t\t\t\tGCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-\t\t\t\tGCC_WARN_UNUSED_FUNCTION = YES;
-\t\t\t\tGCC_WARN_UNUSED_VARIABLE = YES;
-\t\t\t\tINFOPLIST_FILE = CFData-WEB/Info.plist;
-\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 17.0;
-\t\t\t\tLD_RUNPATH_SEARCH_PATHS = (
-\t\t\t\t\t"$(inherited)",
-\t\t\t\t\t"@executable_path/Frameworks",
-\t\t\t\t);
-\t\t\t\tMARKETING_VERSION = 1.0;
-\t\t\t\tMTL_FAST_MATH = YES;
-\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.cfdata.web;
-\t\t\t\tPRODUCT_NAME = "CFData-WEB";
-\t\t\t\tSWIFT_EMIT_LOC_STRINGS = YES;
-\t\t\t\tSWIFT_VERSION = 5.0;
-\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";
-\t\t\t};
-\t\t\tname = Release;
-\t\t};
-/* End XCBuildConfiguration section */
+script_content = 'if [ -f "${SRCROOT}/CFData-WEB/cfdata" ]; then\n  cp "${SRCROOT}/CFData-WEB/cfdata" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata"\n  chmod +x "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata"\nfi\n'
 
-/* Begin XCConfigurationList section */
-\t\t#{BCL_GLOBAL} = {
-\t\t\tisa = XCConfigurationList;
-\t\t\tbuildConfigurations = (
-\t\t\t\t#{DEBUG_GLOBAL},
-\t\t\t\t#{RELEASE_GLOBAL},
-\t\t\t);
-\t\t\tdefaultConfigurationIsVisible = 0;
-\t\t\tdefaultConfigurationName = Release;
-\t\t};
-\t\t#{BCL_TARGET} = {
-\t\t\tisa = XCConfigurationList;
-\t\t\tbuildConfigurations = (
-\t\t\t\t#{DEBUG_GLOBAL},
-\t\t\t\t#{RELEASE_GLOBAL},
-\t\t\t);
-\t\t\tdefaultConfigurationIsVisible = 0;
-\t\t\tdefaultConfigurationName = Release;
-\t\t};
-/* End XCConfigurationList section */
-	};
-	rootObject = #{ROOT};
-}
-PBX
+sections = []
+
+sections << "// !$*UTF8*$!"
+sections << "{"
+sections << "#{i1}archiveVersion = 1;"
+sections << "#{i1}classes = {"
+sections << "#{i1}};"
+sections << "#{i1}objectVersion = 56;"
+sections << "#{i1}objects = {"
+
+sections << ""
+sections << "/* Begin PBXBuildFile section */"
+sections << src_files_pbx
+sections << "/* End PBXBuildFile section */"
+
+sections << ""
+sections << "/* Begin PBXFileReference section */"
+sections << file_refs_pbx
+sections << xcassets_pbx
+sections << product_ref_pbx
+sections << "/* End PBXFileReference section */"
+
+sections << ""
+sections << "/* Begin PBXFrameworksBuildPhase section */"
+sections << "#{i2}#{FRAMEWORKS_PHASE} = {"
+sections << frameworks_pbx
+sections << "#{i2}};"
+sections << "/* End PBXFrameworksBuildPhase section */"
+
+sections << ""
+sections << "/* Begin PBXGroup section */"
+sections << "#{i2}#{MAIN_GROUP} = {"
+sections << "#{i3}isa = PBXGroup;"
+sections << "#{i3}children = ("
+sections << children_pbx
+sections << "#{i3});"
+sections << "#{i3}sourceTree = \"<group>\";"
+sections << "#{i2}};"
+sections << "/* End PBXGroup section */"
+
+sections << ""
+sections << "/* Begin PBXNativeTarget section */"
+sections << "#{i2}#{TARGET} = {"
+sections << "#{i3}isa = PBXNativeTarget;"
+sections << "#{i3}buildConfigurationList = #{BCL_TARGET};"
+sections << "#{i3}buildPhases = ("
+sections << "#{i4}#{SOURCES_PHASE},"
+sections << "#{i4}#{FRAMEWORKS_PHASE},"
+sections << "#{i4}#{RESOURCES_PHASE},"
+sections << "#{i4}#{SCRIPT_PHASE},"
+sections << "#{i3});"
+sections << "#{i3}buildRules = ("
+sections << "#{i3});"
+sections << "#{i3}dependencies = ("
+sections << "#{i3});"
+sections << "#{i3}name = \"CFData-WEB\";"
+sections << "#{i3}productName = \"CFData-WEB\";"
+sections << "#{i3}productReference = #{PRODUCT_REF};"
+sections << "#{i3}productType = \"com.apple.product-type.application\";"
+sections << "#{i2}};"
+sections << "/* End PBXNativeTarget section */"
+
+sections << ""
+sections << "/* Begin PBXProject section */"
+sections << "#{i2}#{ROOT} = {"
+sections << "#{i3}isa = PBXProject;"
+sections << "#{i3}attributes = {"
+sections << "#{i4}BuildIndependentTargetsInParallel = 1;"
+sections << "#{i4}LastSwiftUpdateCheck = 1600;"
+sections << "#{i4}LastUpgradeCheck = 1600;"
+sections << "#{i3}};"
+sections << "#{i3}buildConfigurationList = #{BCL_GLOBAL};"
+sections << "#{i3}compatibilityVersion = \"Xcode 14.0\";"
+sections << "#{i3}developmentRegion = \"en\";"
+sections << "#{i3}hasScannedForEncodings = 0;"
+sections << "#{i3}knownRegions = ("
+sections << "#{i4}en,"
+sections << "#{i4}Base,"
+sections << '#{i4}"zh-Hans",'
+sections << "#{i3});"
+sections << "#{i3}mainGroup = #{MAIN_GROUP};"
+sections << "#{i3}productRefGroup = #{MAIN_GROUP};"
+sections << "#{i3}projectDirPath = \"\";"
+sections << "#{i3}projectRoot = \"\";"
+sections << "#{i3}targets = ("
+sections << "#{i4}#{TARGET},"
+sections << "#{i3});"
+sections << "#{i2}};"
+sections << "/* End PBXProject section */"
+
+sections << ""
+sections << "/* Begin PBXResourcesBuildPhase section */"
+sections << "#{i2}#{RESOURCES_PHASE} = {"
+sections << "#{i3}isa = PBXResourcesBuildPhase;"
+sections << "#{i3}buildActionMask = 2147483647;"
+sections << "#{i3}files = ("
+sections << "#{i3});"
+sections << "#{i3}runOnlyForDeploymentPostprocessing = 0;"
+sections << "#{i2}};"
+sections << "/* End PBXResourcesBuildPhase section */"
+
+sections << ""
+sections << "/* Begin PBXShellScriptBuildPhase section */"
+sections << "#{i2}#{SCRIPT_PHASE} = {"
+sections << "#{i3}isa = PBXShellScriptBuildPhase;"
+sections << "#{i3}buildActionMask = 2147483647;"
+sections << "#{i3}files = ("
+sections << "#{i3});"
+sections << "#{i3}inputPaths = ("
+sections << "#{i3});"
+sections << "#{i3}name = \"Copy Go Backend\";"
+sections << "#{i3}outputPaths = ("
+sections << "#{i3});"
+sections << "#{i3}runOnlyForDeploymentPostprocessing = 0;"
+sections << "#{i3}shellPath = /bin/sh;"
+sections << "#{i3}shellScript = \"#{script_content}\";"
+sections << "#{i3}showEnvVarsInLog = 0;"
+sections << "#{i2}};"
+sections << "/* End PBXShellScriptBuildPhase section */"
+
+sections << ""
+sections << "/* Begin PBXSourcesBuildPhase section */"
+sections << "#{i2}#{SOURCES_PHASE} = {"
+sections << "#{i3}isa = PBXSourcesBuildPhase;"
+sections << "#{i3}buildActionMask = 2147483647;"
+sections << "#{i3}files = ("
+sections << sources_files_pbx
+sections << "#{i3});"
+sections << "#{i3}runOnlyForDeploymentPostprocessing = 0;"
+sections << "#{i2}};"
+sections << "/* End PBXSourcesBuildPhase section */"
+
+sections << ""
+sections << "/* Begin XCBuildConfiguration section */"
+sections << "#{i2}#{DEBUG_GLOBAL} = {"
+sections << "#{i3}isa = XCBuildConfiguration;"
+sections << "#{i3}buildSettings = {"
+sections << debug_build_settings
+sections << "#{i3}};"
+sections << "#{i3}name = Debug;"
+sections << "#{i2}};"
+sections << "#{i2}#{RELEASE_GLOBAL} = {"
+sections << "#{i3}isa = XCBuildConfiguration;"
+sections << "#{i3}buildSettings = {"
+sections << release_build_settings
+sections << "#{i3}};"
+sections << "#{i3}name = Release;"
+sections << "#{i2}};"
+sections << "/* End XCBuildConfiguration section */"
+
+sections << ""
+sections << "/* Begin XCConfigurationList section */"
+sections << "#{i2}#{BCL_GLOBAL} = {"
+sections << "#{i3}isa = XCConfigurationList;"
+sections << "#{i3}buildConfigurations = ("
+sections << "#{i4}#{DEBUG_GLOBAL},"
+sections << "#{i4}#{RELEASE_GLOBAL},"
+sections << "#{i3});"
+sections << "#{i3}defaultConfigurationIsVisible = 0;"
+sections << "#{i3}defaultConfigurationName = Release;"
+sections << "#{i2}};"
+sections << "#{i2}#{BCL_TARGET} = {"
+sections << "#{i3}isa = XCConfigurationList;"
+sections << "#{i3}buildConfigurations = ("
+sections << "#{i4}#{DEBUG_GLOBAL},"
+sections << "#{i4}#{RELEASE_GLOBAL},"
+sections << "#{i3});"
+sections << "#{i3}defaultConfigurationIsVisible = 0;"
+sections << "#{i3}defaultConfigurationName = Release;"
+sections << "#{i2}};"
+sections << "/* End XCConfigurationList section */"
+
+sections << "#{i1}};"
+sections << "#{i1}rootObject = #{ROOT};"
+sections << "}"
+
+output = sections.join("\n") + "\n"
 
 FileUtils.mkdir_p(XCODE_PROJECT)
-File.write(PBXPROJ, template)
+File.write(PBXPROJ, output)
 puts "Generated: #{PBXPROJ}"
 puts "Swift files: #{swift_files.length}"
 puts "Asset catalogs: #{xcassets.length}"
