@@ -198,7 +198,7 @@ release_build_settings = <<~RELEASE.chomp
 #{i3}TARGETED_DEVICE_FAMILY = "1,2";
 RELEASE
 
-script_content = 'if [ -f "${SRCROOT}/CFData-WEB/cfdata" ]; then\n  cp "${SRCROOT}/CFData-WEB/cfdata" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata"\n  chmod +x "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata"\nfi\n'
+script_content = 'if [ -f \"${SRCROOT}/CFData-WEB/cfdata\" ]; then\n  cp \"${SRCROOT}/CFData-WEB/cfdata\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata\"\n  chmod +x \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cfdata\"\nfi\n'
 
 sections = []
 
@@ -278,7 +278,7 @@ sections << "#{i3}hasScannedForEncodings = 0;"
 sections << "#{i3}knownRegions = ("
 sections << "#{i4}en,"
 sections << "#{i4}Base,"
-sections << '#{i4}"zh-Hans",'
+sections << "#{i4}\"zh-Hans\","
 sections << "#{i3});"
 sections << "#{i3}mainGroup = #{MAIN_GROUP};"
 sections << "#{i3}productRefGroup = #{MAIN_GROUP};"
